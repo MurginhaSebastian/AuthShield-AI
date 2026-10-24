@@ -55,7 +55,7 @@ with st.sidebar:
     n_events = st.slider("Eventos", 100, 5000, 1000, step=100)
     bf_pct = st.slider("% fuerza bruta", 0, 30, 6)
     ato_pct = st.slider("% robo de identidad", 0, 30, 4)
-    seed = st.number_input("Semilla", value=7, step=1)
+    seed = st.number_input("Semilla", min_value=0, value=7, step=1)
     run = st.button("Simular tráfico", type="primary", width="stretch")
 
 if run:
