@@ -66,8 +66,11 @@ jobs:
         run: |
           timeout 120 sh -c 'until curl -sf localhost:8501/_stcore/health; do sleep 2; done'
           timeout 120 sh -c 'until curl -sf localhost:8000/health; do sleep 2; done'
+          EVENT='{"failed_logins_5m": 35, "is_new_ip": 1, "unusual_hour": 0, "requests_per_minute": 140}'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8000/evaluate \
+            -H 'Content-Type: application/json' -d "$EVENT")" = 401
           curl -sf -X POST localhost:8000/evaluate -H 'Content-Type: application/json' \
-            -d '{"failed_logins_5m": 35, "is_new_ip": 1, "unusual_hour": 0, "requests_per_minute": 140}' | grep -q "FUERZA BRUTA"
+            -H "X-API-Key: $API_KEY" -d "$EVENT" | grep -q "FUERZA BRUTA"
       - name: Healthcheck de Docker en ambos modos
         run: |
           for c in ui api; do

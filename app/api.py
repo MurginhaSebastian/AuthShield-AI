@@ -1,5 +1,6 @@
 """Microservicio de evaluación de riesgo de AuthShield-AI (FastAPI)."""
 
+import hmac
 import os
 import sys
 import time
@@ -8,9 +9,10 @@ from pathlib import Path
 from typing import Literal
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Security
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, ConfigDict, Field
 
 # Igual que el dashboard: permite arrancar desde cualquier directorio.
@@ -33,6 +35,21 @@ def load_api_keys() -> list[str]:
     if any(len(k) < MIN_KEY_LENGTH for k in keys):
         raise RuntimeError(f"Cada API key debe tener al menos {MIN_KEY_LENGTH} caracteres.")
     return keys
+
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def require_api_key(request: Request, api_key: str | None = Security(api_key_header)) -> None:
+    """401 si falta la clave o no coincide con ninguna configurada."""
+    # compare_digest tarda lo mismo acierte o falle: no deja adivinar la clave midiendo tiempos.
+    # Se compara en bytes porque con texto no ASCII lanzaría TypeError (un 500).
+    if not api_key or not any(
+        hmac.compare_digest(api_key.encode(), key.encode()) for key in request.app.state.api_keys
+    ):
+        raise HTTPException(
+            status_code=401, detail="API key inválida o ausente", headers={"WWW-Authenticate": "APIKey"}
+        )
 
 
 class LoginEvent(BaseModel):
@@ -86,7 +103,7 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/evaluate", response_model=Verdict)
+@app.post("/evaluate", response_model=Verdict, dependencies=[Security(require_api_key)])
 def evaluate(event: LoginEvent, request: Request) -> Verdict:
     start = time.perf_counter()
     try:
