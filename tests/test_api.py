@@ -40,3 +40,16 @@ def test_fuerza_bruta(client):
 )
 def test_rechaza_eventos_invalidos(client, body):
     assert client.post("/evaluate", json=body).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"failed_logins_5m": 0, "is_new_ip": 0, "unusual_hour": 0, "requests_per_minute": Infinity}',
+        '{"failed_logins_5m": 0, "is_new_ip": 0, "unusual_hour": 0, "requests_per_minute": 1e309}',
+        '{"failed_logins_5m": 1' + "0" * 40 + ', "is_new_ip": 0, "unusual_hour": 0, "requests_per_minute": 1}',
+    ],
+)
+def test_rechaza_valores_no_finitos(client, raw):
+    response = client.post("/evaluate", content=raw, headers={"Content-Type": "application/json"})
+    assert response.status_code == 422

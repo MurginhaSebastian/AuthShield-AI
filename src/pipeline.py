@@ -121,7 +121,11 @@ def validate(events: pd.DataFrame) -> pd.DataFrame:
     not_binary = [c for c in BINARY_FEATURES if not X[c].isin([0, 1]).all()]
     if not_binary:
         raise ValueError(f"{not_binary} solo admiten 0 o 1")
-    return X.astype("float32")
+    X = X.astype("float32")
+    # Después del cast: un entero enorme también se vuelve infinito en float32.
+    if not np.isfinite(X.to_numpy()).all():
+        raise ValueError("Las features deben ser números finitos")
+    return X
 
 
 def _log_continuous(X: pd.DataFrame) -> np.ndarray:

@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Literal
 
 import pandas as pd
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 # Igual que el dashboard: permite arrancar desde cualquier directorio.
@@ -24,7 +26,9 @@ class LoginEvent(BaseModel):
     failed_logins_5m: int = Field(ge=0, description="Intentos fallidos en los últimos 5 minutos")
     is_new_ip: Literal[0, 1] = Field(description="1 si la IP nunca se vio para este usuario")
     unusual_hour: Literal[0, 1] = Field(description="1 si ocurre fuera del horario habitual")
-    requests_per_minute: float = Field(ge=0, description="Peticiones de autenticación por minuto")
+    requests_per_minute: float = Field(
+        ge=0, allow_inf_nan=False, description="Peticiones de autenticación por minuto"
+    )
 
 
 class Verdict(BaseModel):
@@ -52,6 +56,13 @@ app = FastAPI(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    # Sin eco del valor recibido: Infinity/NaN no se pueden serializar y tumbarían la respuesta.
+    errors = [{"loc": e["loc"], "msg": e["msg"], "type": e["type"]} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
@@ -60,7 +71,10 @@ def health() -> dict:
 @app.post("/evaluate", response_model=Verdict)
 def evaluate(event: LoginEvent, request: Request) -> Verdict:
     start = time.perf_counter()
-    result = score(pd.DataFrame([event.model_dump()]), request.app.state.artifacts).iloc[0]
+    try:
+        result = score(pd.DataFrame([event.model_dump()]), request.app.state.artifacts).iloc[0]
+    except ValueError as exc:  # segunda barrera: validate() del pipeline
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return Verdict(
         p_rf=round(float(result["p_rf"]), 4),
         p_nn=round(float(result["p_nn"]), 4),

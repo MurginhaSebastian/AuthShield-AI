@@ -41,6 +41,8 @@ def test_simulacion_rechaza_proporciones_imposibles():
         {"failed_logins_5m": -1},
         {"requests_per_minute": "rápido"},
         {"requests_per_minute": np.nan},
+        {"requests_per_minute": np.inf},
+        {"failed_logins_5m": 10**40},
     ],
 )
 def test_validate_rechaza_valores_invalidos(events, change):
