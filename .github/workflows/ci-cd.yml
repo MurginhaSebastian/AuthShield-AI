@@ -1,0 +1,54 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Escaneo de secretos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # CLI directa: recorre todo el historial, incluido el commit raíz.
+      - name: gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar xz gitleaks
+          ./gitleaks git --redact --verbose .
+
+  test:
+    name: Lint, pruebas y entrenamiento de verificación
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Dependencias
+        run: pip install -r requirements.txt pytest==9.1.1 ruff==0.7.4 pip-audit==2.7.3
+      - name: Lint
+        run: ruff check .
+      - name: Pruebas
+        run: python -m pytest -q
+      - name: Auditoría de dependencias
+        run: pip-audit -r requirements.txt
+      - name: Entrenamiento de verificación
+        run: |
+          python -m src.pipeline --events 5000 --out /tmp/ci/auth_logs.csv
+          python -m src.train --data /tmp/ci/auth_logs.csv --models-dir /tmp/ci/models
+
+  docker:
+    name: Build de la imagen
+    needs: [secrets, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build
+        run: docker build -t auth-shield-ai .

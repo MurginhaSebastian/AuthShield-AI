@@ -56,7 +56,7 @@ with st.sidebar:
     bf_pct = st.slider("% fuerza bruta", 0, 30, 6)
     ato_pct = st.slider("% robo de identidad", 0, 30, 4)
     seed = st.number_input("Semilla", value=7, step=1)
-    run = st.button("Simular tráfico", type="primary", use_container_width=True)
+    run = st.button("Simular tráfico", type="primary", width="stretch")
 
 if run:
     events = simulate_events(n_events, bf_pct / 100, ato_pct / 100, int(seed))
@@ -98,7 +98,7 @@ with tab_sim:
             )[["veredicto", "real", *FEATURES, "p_rf", "p_nn"]]
             st.dataframe(
                 shown.rename(columns=LABELS),
-                use_container_width=True,
+                width="stretch",
                 height=360,
                 column_config={
                     "p_rf": st.column_config.ProgressColumn("P(fuerza bruta)", min_value=0, max_value=1),
@@ -146,7 +146,7 @@ with tab_models:
     table = pd.DataFrame(
         {names[k]: {m: v for m, v in meta["metrics"][k].items() if m != "confusion_matrix"} for k in names}
     ).T
-    st.dataframe(table, use_container_width=True)
+    st.dataframe(table, width="stretch")
 
     lat = meta["latency_ms"]
     st.metric("Latencia p95 por evento", f"{lat['p95']:.1f} ms", help="Requisito RNF-01: < 50 ms")

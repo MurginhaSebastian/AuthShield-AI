@@ -3,4 +3,6 @@ pandas==2.2.3
 scikit-learn==1.5.2
 joblib==1.4.2
 tensorflow==2.18.0
-streamlit==1.40.1
+streamlit==1.66.1
+# Dependencia de streamlit, fijada por vulnerabilidades conocidas en versiones anteriores.
+pillow==13.0.0
