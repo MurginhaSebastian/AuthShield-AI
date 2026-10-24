@@ -3,8 +3,37 @@
 **Sistema híbrido de detección de anomalías en logs de autenticación**
 Machine Learning clásico (Random Forest) + Deep Learning (red neuronal densa en Keras), con un dashboard de simulación en Streamlit.
 
-> **Estado:** Fase 1 — Especificación de requerimientos y arquitectura conceptual.
-> Este documento es la especificación técnica del sistema. Todavía no hay código ejecutable.
+---
+
+## Inicio rápido
+
+**Con Docker** (incluye dataset y modelos ya entrenados):
+
+```bash
+docker build -t auth-shield-ai .
+docker run --rm -p 8501:8501 auth-shield-ai
+# Dashboard en http://localhost:8501
+```
+
+**En local** (Python 3.12):
+
+```bash
+python -m venv .venv
+.venv/Scripts/activate            # Windows  ·  source .venv/bin/activate en Linux/macOS
+pip install -r requirements.txt
+
+python -m src.pipeline            # genera data/auth_logs.csv (opciones: --events, --seed, ...)
+python -m src.train               # entrena ambos modelos y guarda models/
+streamlit run app/dashboard.py
+```
+
+**Pruebas y lint:**
+
+```bash
+pip install pytest ruff
+python -m pytest -q
+ruff check .
+```
 
 ---
 
@@ -17,6 +46,7 @@ Machine Learning clásico (Random Forest) + Deep Learning (red neuronal densa en
 5. [Métricas de ingeniería de software](#5-métricas-de-ingeniería-de-software)
 6. [Arquitectura conceptual](#6-arquitectura-conceptual)
 7. [Alcance, supuestos y riesgos](#7-alcance-supuestos-y-riesgos)
+8. [Resultados](#8-resultados)
 
 ---
 
@@ -55,7 +85,7 @@ Es un proyecto de portafolio de Ingeniería de Sistemas. Su objetivo es mostrar,
 | **RF-01** | Simulación de tráfico de autenticación | Generar eventos sintéticos de login, tanto legítimos como maliciosos (fuerza bruta, robo de identidad), con proporciones configurables (`src/pipeline.py`). Sirve para construir `data/auth_logs.csv` y para alimentar el dashboard en vivo. | Se puede elegir el número de eventos y el % de cada tipo de ataque; cada evento trae las 4 features y sus etiquetas (ver [4.4](#44-etiquetas)). |
 | **RF-02** | Pipeline de preprocesamiento | Validar, limpiar y escalar las features con un único pipeline que se usa igual en entrenamiento y en inferencia (`src/pipeline.py`). | Un evento con tipos o rangos inválidos se rechaza con un error explícito, nunca se puntúa en silencio. El scaler se ajusta **solo** con el conjunto de entrenamiento. |
 | **RF-03** | Entrenamiento de ambos modelos | Entrenar, con el mismo split estratificado (`src/train.py`), el Random Forest para detectar fuerza bruta y la red neuronal para detectar anomalías de identidad. Reportar las métricas de la sección 5 sobre un conjunto de prueba que no se usó para entrenar. | Se genera un reporte con matriz de confusión, Precision, Recall, F1, F2 y PR-AUC para cada modelo (sobre su tipo de ataque) y para el veredicto combinado (sobre todos los ataques). |
-| **RF-04** | Guardado automático de artefactos | Al terminar el entrenamiento, persistir sin intervención manual `models/ml_auth_model.pkl`, `models/dl_auth_model.h5` y `models/scaler.pkl`. | El dashboard arranca solo con esos artefactos, sin reentrenar. Si falta alguno, muestra un error claro en lugar de fallar a mitad de camino. |
+| **RF-04** | Guardado automático de artefactos | Al terminar el entrenamiento, persistir sin intervención manual `models/ml_auth_model.pkl`, `models/dl_auth_model.h5` y `models/scaler.pkl`. | El dashboard arranca solo con esos artefactos (más `models/metadata.json`, con umbrales y métricas), sin reentrenar. Si falta alguno, muestra un error claro en lugar de fallar a mitad de camino. |
 | **RF-05** | Evaluación concurrente por ambos modelos | Cada evento se puntúa con los dos modelos sobre el mismo vector escalado. El RF devuelve la probabilidad de fuerza bruta, la NN la de anomalía de identidad, y el sistema emite un veredicto combinado (ver [6.3](#63-regla-de-decisión-combinada)). | La salida por evento incluye `p_rf`, `p_nn`, el veredicto final con el tipo de ataque sospechado y la latencia medida. |
 | **RF-06** | Despliegue visual de alertas | El dashboard de Streamlit (`app/dashboard.py`) muestra el flujo simulado, las alertas por nivel de severidad, la comparación entre modelos y sus métricas. | Las alertas se distinguen por color **y** por texto/icono (no solo por color). Hay una vista de “evento manual” donde el usuario ajusta las 4 features y ve el veredicto al instante. |
 | **RF-07** | Explicabilidad básica | Mostrar por qué se marcó un evento: importancia global de variables del Random Forest y valores del evento comparados con lo normal. | Cada alerta muestra qué features estaban fuera de rango. |
@@ -111,7 +141,7 @@ Los dos últimos casos son el argumento del sistema. Ninguna variable por separa
 ### 4.3 Preprocesamiento
 
 - Las variables binarias se pasan sin transformar.
-- `failed_logins_5m` y `requests_per_minute` se estandarizan con el `scaler.pkl` ajustado en entrenamiento. La red neuronal lo necesita para converger. Al Random Forest no le afecta, pero recibe el mismo vector para que ambos modelos compartan una única ruta de inferencia.
+- `failed_logins_5m` y `requests_per_minute` tienen colas largas: se transforman con `log1p` y luego se estandarizan con el `scaler.pkl` ajustado en entrenamiento. La red neuronal lo necesita para converger. Al Random Forest no le afecta, pero recibe el mismo vector para que ambos modelos compartan una única ruta de inferencia.
 - Los valores fuera de rango (negativos, binarias distintas de 0/1) se rechazan en la validación (RF-02).
 
 ### 4.4 Etiquetas
@@ -191,10 +221,11 @@ Medidos sobre el conjunto de prueba, con el veredicto combinado contra `label`. 
 | Componente | Ubicación | Responsabilidad |
 |---|---|---|
 | Datos | `data/auth_logs.csv` | Dataset histórico/simulado etiquetado (4 features + etiqueta). |
-| Pipeline | `src/pipeline.py` | Simulación de eventos y generación de `data/auth_logs.csv` (RF-01), validación del esquema, separación de features y etiquetas, escalado y carga/guardado del scaler. |
-| Entrenamiento | `src/train.py` | Split estratificado, entrenamiento del RF y la NN, calibración de umbrales, evaluación y persistencia de artefactos. |
-| Artefactos | `models/` | `ml_auth_model.pkl` (RF), `dl_auth_model.h5` (NN), `scaler.pkl`. Son la única interfaz entre el entrenamiento y la inferencia. |
+| Pipeline | `src/pipeline.py` | Simulación de eventos y generación de `data/auth_logs.csv` (RF-01), validación del esquema, escalado, carga de artefactos e inferencia con la regla combinada. |
+| Entrenamiento | `src/train.py` | Split estratificado, entrenamiento del RF y la NN, calibración de umbrales, evaluación, medición de latencia y persistencia de artefactos. |
+| Artefactos | `models/` | `ml_auth_model.pkl` (RF), `dl_auth_model.h5` (NN), `scaler.pkl` y `metadata.json` (umbrales, métricas, latencia). Son la única interfaz entre el entrenamiento y la inferencia. |
 | Dashboard | `app/dashboard.py` | Simulación de tráfico, evaluación en vivo, alertas, métricas y vista de evento manual. |
+| Pruebas | `tests/` | Simulador, validación, escalado, regla de decisión y calibración de umbrales. |
 | CI/CD | `.github/workflows/ci-cd.yml` | Lint, pruebas, escaneo de seguridad, entrenamiento de verificación y build de la imagen Docker. |
 | Contenedor | `Dockerfile` | Empaqueta dependencias y aplicación con un usuario no root. |
 
@@ -242,7 +273,7 @@ Es una regla **OR orientada al Recall**: basta con que uno de los dos especialis
 | Aspecto | Random Forest | Red neuronal (Keras) |
 |---|---|---|
 | Especialidad | Fuerza bruta (`attack_type == brute_force`) | Anomalía de identidad (`attack_type == account_takeover`) |
-| Tipo | Ensamble de árboles de decisión | Modelo `Sequential` denso (4 → capas ocultas → 1, salida sigmoide) |
+| Tipo | Ensamble de 150 árboles (profundidad máx. 12) | Modelo `Sequential` denso: 4 → 32 → 16 → 1, salida sigmoide |
 | Fortaleza | Interpretable (importancia de variables), robusto, poco sensible al escalado | Fronteras de decisión suaves y no lineales |
 | Desbalance | `class_weight="balanced"` | `class_weight` en el entrenamiento |
 | Regularización | Profundidad máxima, mínimo de muestras por hoja | Dropout, early stopping sobre el conjunto de validación |
@@ -273,3 +304,34 @@ Es una regla **OR orientada al Recall**: basta con que uno de los dos especialis
 | Ataques mixtos (fuerza bruta desde IP nueva y a hora atípica). | Ambos especialistas se activan a la vez. | Es el comportamiento deseado: produce la ALERTA CRÍTICA (6.3). El simulador debe incluir estos casos. |
 | Deserialización insegura de `.pkl`. | Ejecución de código arbitrario. | RNF-07: los artefactos solo se cargan desde `models/` y se generan dentro del propio pipeline. |
 | Sobrecarga de inferencia de Keras por llamada. | Incumplir los 50 ms. | Invocación directa del modelo y calentamiento previo (RNF-01). |
+
+---
+
+## 8. Resultados
+
+Conjunto de prueba (4 000 eventos, 20 % del dataset, nunca vistos en entrenamiento ni en la calibración de umbrales). Semilla 42. Valores tomados de `models/metadata.json`.
+
+| Modelo | Tarea | Precision | Recall | F1 | F2 | PR-AUC |
+|---|---|---|---|---|---|---|
+| Random Forest | Fuerza bruta | 0.924 | **0.991** | 0.957 | 0.977 | 0.997 |
+| Red neuronal | Robo de identidad | 0.710 | 0.934 | 0.807 | 0.879 | 0.927 |
+| RF de referencia | Robo de identidad | 0.571 | 0.947 | 0.713 | 0.837 | 0.914 |
+| **Veredicto combinado** | **Todos los ataques** | **0.836** | **0.969** | **0.898** | **0.939** | **0.976** |
+
+**Frente a los objetivos de la sección 5.4:**
+
+| Métrica | Objetivo | Obtenido | |
+|---|---|---|---|
+| Recall | ≥ 0.95 | 0.969 | ✅ |
+| F1-Score | ≥ 0.90 | 0.898 | ⚠️ Por poco |
+| Precision | ≥ 0.85 | 0.836 | ⚠️ Por poco |
+| PR-AUC | ≥ 0.95 | 0.976 | ✅ |
+| Latencia p95 | < 50 ms | 19 ms | ✅ |
+
+**Lectura:**
+
+- **Se cumple la restricción dura.** Solo se escapan 12 de 385 ataques (Recall 0.969) y la latencia p95 por evento queda muy por debajo de los 50 ms.
+- **La fuerza bruta es casi un problema resuelto** con estas variables: `failed_logins_5m` y `requests_per_minute` concentran el 90 % de la importancia del Random Forest.
+- **El robo de identidad es el caso difícil.** Un ataque con la contraseña correcta, desde una IP nueva y de madrugada se parece mucho a un usuario legítimo de viaje: con solo 4 variables, ese solapamiento es irreducible. Ahí se pierde la Precision combinada.
+- **La red neuronal sí aporta.** En la misma tarea de identidad supera al RF de referencia en F1 (0.807 frente a 0.713) con un Recall comparable: es el argumento empírico del diseño híbrido.
+- **Siguiente mejora natural:** añadir variables que distingan al viajero del atacante (viaje imposible, huella del dispositivo, reputación de la IP), fuera del alcance de esta fase (7.1).
