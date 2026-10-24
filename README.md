@@ -13,6 +13,9 @@ Machine Learning clásico (Random Forest) + Deep Learning (red neuronal densa en
 docker build -t auth-shield-ai .
 docker run --rm -p 8501:8501 auth-shield-ai
 # Dashboard en http://localhost:8501
+
+docker run --rm -p 8000:8000 auth-shield-ai uvicorn app.api:app --host 0.0.0.0 --port 8000
+# API en http://localhost:8000 · documentación interactiva en /docs
 ```
 
 **En local** (Python 3.12):
@@ -24,13 +27,23 @@ pip install -r requirements.txt
 
 python -m src.pipeline            # genera data/auth_logs.csv (opciones: --events, --seed, ...)
 python -m src.train               # entrena ambos modelos y guarda models/
-streamlit run app/dashboard.py
+streamlit run app/dashboard.py     # dashboard
+uvicorn app.api:app --port 8000    # API
+```
+
+**Evaluar un login con la API:**
+
+```bash
+curl -X POST http://localhost:8000/evaluate \
+  -H "Content-Type: application/json" \
+  -d '{"failed_logins_5m": 0, "is_new_ip": 1, "unusual_hour": 1, "requests_per_minute": 9}'
+# {"p_rf":0.0,"p_nn":0.9964,"verdict":"ANOMALÍA DE IDENTIDAD","latency_ms":10.05}
 ```
 
 **Pruebas y lint:**
 
 ```bash
-pip install pytest ruff
+pip install pytest httpx ruff
 python -m pytest -q
 ruff check .
 ```
@@ -89,6 +102,7 @@ Es un proyecto de portafolio de Ingeniería de Sistemas. Su objetivo es mostrar,
 | **RF-05** | Evaluación concurrente por ambos modelos | Cada evento se puntúa con los dos modelos sobre el mismo vector escalado. El RF devuelve la probabilidad de fuerza bruta, la NN la de anomalía de identidad, y el sistema emite un veredicto combinado (ver [6.3](#63-regla-de-decisión-combinada)). | La salida por evento incluye `p_rf`, `p_nn`, el veredicto final con el tipo de ataque sospechado y la latencia medida. |
 | **RF-06** | Despliegue visual de alertas | El dashboard de Streamlit (`app/dashboard.py`) muestra el flujo simulado, las alertas por nivel de severidad, la comparación entre modelos y sus métricas. | Las alertas se distinguen por color **y** por texto/icono (no solo por color). Hay una vista de “evento manual” donde el usuario ajusta las 4 features y ve el veredicto al instante. |
 | **RF-07** | Explicabilidad básica | Mostrar por qué se marcó un evento: importancia global de variables del Random Forest y valores del evento comparados con lo normal. | Cada alerta muestra qué features estaban fuera de rango. |
+| **RF-08** | API de evaluación | Microservicio HTTP (`app/api.py`, FastAPI) para que cualquier aplicación envíe un evento de login y reciba el veredicto. `POST /evaluate` y `GET /health`. | Una entrada inválida (tipos, rangos, campos faltantes o desconocidos) recibe un 422 sin llegar a los modelos. La respuesta incluye `p_rf`, `p_nn`, el veredicto y la latencia. |
 
 ---
 
@@ -225,6 +239,7 @@ Medidos sobre el conjunto de prueba, con el veredicto combinado contra `label`. 
 | Entrenamiento | `src/train.py` | Split estratificado, entrenamiento del RF y la NN, calibración de umbrales, evaluación, medición de latencia y persistencia de artefactos. |
 | Artefactos | `models/` | `ml_auth_model.pkl` (RF), `dl_auth_model.h5` (NN), `scaler.pkl` y `metadata.json` (umbrales, métricas, latencia). Son la única interfaz entre el entrenamiento y la inferencia. |
 | Dashboard | `app/dashboard.py` | Simulación de tráfico, evaluación en vivo, alertas, métricas y vista de evento manual. |
+| API | `app/api.py` | Microservicio FastAPI: valida el evento en la entrada, lo puntúa con `score()` y devuelve el veredicto. Carga los modelos y los calienta al arrancar. |
 | Pruebas | `tests/` | Simulador, validación, escalado, regla de decisión y calibración de umbrales. |
 | CI/CD | `.github/workflows/ci-cd.yml` | Lint, pruebas, escaneo de seguridad, entrenamiento de verificación y build de la imagen Docker. |
 | Contenedor | `Dockerfile` | Empaqueta dependencias y aplicación con un usuario no root. |
@@ -242,14 +257,15 @@ flowchart LR
         E --> A[(models/: .pkl, .h5, scaler)]
     end
 
-    subgraph Online["Inferencia (dashboard)"]
+    subgraph Online["Inferencia (dashboard y API)"]
         S[Simulador de tráfico / evento manual] --> P2[pipeline: validar + escalar]
+        C[App cliente → POST /evaluate] --> P2
         A -.carga.-> P2
         P2 --> RF2[RF → p_rf]
         P2 --> NN2[NN → p_nn]
         RF2 --> R{Regla de decisión}
         NN2 --> R
-        R --> V[Veredicto + alerta en Streamlit]
+        R --> V[Veredicto: alerta en Streamlit o respuesta JSON]
     end
 ```
 
@@ -288,6 +304,7 @@ Es una regla **OR orientada al Recall**: basta con que uno de los dos especialis
 - Integración con un proveedor de identidad real (Supabase Auth, Keycloak, Auth0).
 - Variables avanzadas: geolocalización, “viaje imposible”, huella del dispositivo, reputación de la IP.
 - Respuesta automática (bloqueo real de cuentas). El sistema **detecta y alerta**, no actúa.
+- Autenticación y rate limiting de la propia API: antes de exponerla fuera de una red de confianza, habría que ponerla detrás de un gateway con API keys y límites de tasa.
 - Reentrenamiento continuo y detección de *drift* en producción.
 
 ### 7.2 Supuestos
