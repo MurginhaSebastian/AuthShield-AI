@@ -153,6 +153,9 @@ def main() -> None:
         raise SystemExit(f"No existe {args.data}. Genéralo con: python -m src.pipeline")
 
     df = pd.read_csv(args.data)
+    missing = {"normal", "brute_force", "account_takeover"} - set(df["attack_type"])
+    if missing:
+        raise SystemExit(f"El dataset no tiene eventos de tipo {sorted(missing)}: cada modelo necesita su clase.")
     train, val, test = split(df, args.seed)
     X_train, X_val, X_test = validate(train), validate(val), validate(test)
     scaler = fit_scaler(X_train)
