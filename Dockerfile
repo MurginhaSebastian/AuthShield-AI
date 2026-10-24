@@ -18,7 +18,8 @@ COPY models/ models/
 RUN useradd --create-home --uid 1000 authshield
 USER authshield
 
-EXPOSE 8501
+# 8501: dashboard (por defecto) · 8000: API (uvicorn app.api:app)
+EXPOSE 8501 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"
 
