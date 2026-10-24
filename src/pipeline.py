@@ -1,4 +1,4 @@
-"""Simulación de eventos de autenticación y generación del dataset."""
+"""Simulación de eventos de autenticación, validación y escalado de features."""
 
 from __future__ import annotations
 
@@ -7,12 +7,16 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
 FEATURES = ["failed_logins_5m", "is_new_ip", "unusual_hour", "requests_per_minute"]
+BINARY_FEATURES = ["is_new_ip", "unusual_hour"]
+CONTINUOUS_FEATURES = ["failed_logins_5m", "requests_per_minute"]
 ATTACK_TYPES = ("normal", "brute_force", "account_takeover")
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_PATH = ROOT / "data" / "auth_logs.csv"
+MODELS_DIR = ROOT / "models"
 
 
 def _poisson(rng: np.random.Generator, lam: float):
@@ -48,8 +52,9 @@ def _profiles(rng: np.random.Generator) -> dict[str, list[tuple]]:
             (0.30, _uniform_int(rng, 3, 9), 0.70, 0.40, _lognormal(rng, 6, 0.4)),  # bajo y lento
         ],
         "account_takeover": [
-            (0.85, _poisson(rng, 0.2), 0.97, 0.85, _lognormal(rng, 4, 0.5)),  # credenciales robadas
-            (0.15, _uniform_int(rng, 1, 2), 0.95, 0.70, _lognormal(rng, 5, 0.5)),  # prueba antes de acertar
+            # Tras entrar, el atacante recorre la cuenta a ritmo de script: más peticiones/min.
+            (0.85, _poisson(rng, 0.2), 0.97, 0.90, _lognormal(rng, 8, 0.5)),  # credenciales robadas
+            (0.15, _uniform_int(rng, 1, 2), 0.95, 0.75, _lognormal(rng, 8, 0.5)),  # prueba antes de acertar
         ],
     }
 
@@ -96,6 +101,44 @@ def simulate_events(
     df = pd.concat(segments, ignore_index=True)
     df["label"] = (df["attack_type"] != "normal").astype(int)
     return df.sample(frac=1, random_state=seed).reset_index(drop=True)
+
+
+def validate(events: pd.DataFrame) -> pd.DataFrame:
+    """Comprueba el esquema y devuelve solo las features, como float32.
+
+    Un evento inválido se rechaza con ValueError: nunca se puntúa en silencio.
+    """
+    missing = [c for c in FEATURES if c not in events.columns]
+    if missing:
+        raise ValueError(f"Faltan columnas: {missing}")
+
+    X = events[FEATURES].apply(pd.to_numeric, errors="coerce")
+    if X.isna().any().any():
+        raise ValueError("Hay valores vacíos o no numéricos en las features")
+    if (X < 0).any().any():
+        raise ValueError("Las features no pueden ser negativas")
+    not_binary = [c for c in BINARY_FEATURES if not X[c].isin([0, 1]).all()]
+    if not_binary:
+        raise ValueError(f"{not_binary} solo admiten 0 o 1")
+    return X.astype("float32")
+
+
+def _log_continuous(X: pd.DataFrame) -> np.ndarray:
+    # Fallos y peticiones/min tienen colas largas: log1p las acerca a una normal.
+    return np.log1p(X[CONTINUOUS_FEATURES].to_numpy())
+
+
+def fit_scaler(X: pd.DataFrame) -> StandardScaler:
+    """Ajusta el escalado con las features ya validadas del conjunto de entrenamiento."""
+    return StandardScaler().fit(_log_continuous(X))
+
+
+def transform(X: pd.DataFrame, scaler: StandardScaler) -> np.ndarray:
+    """Vector listo para los modelos: binarias intactas, continuas en log + estandarizadas."""
+    out = X[FEATURES].to_numpy(dtype="float32", copy=True)
+    cols = [FEATURES.index(c) for c in CONTINUOUS_FEATURES]
+    out[:, cols] = scaler.transform(_log_continuous(X))
+    return out
 
 
 def main() -> None:
