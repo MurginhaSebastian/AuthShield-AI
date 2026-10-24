@@ -1,8 +1,9 @@
-"""Simulación de eventos de autenticación, validación y escalado de features."""
+"""Simulación de eventos, validación, escalado e inferencia con los modelos guardados."""
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -139,6 +140,62 @@ def transform(X: pd.DataFrame, scaler: StandardScaler) -> np.ndarray:
     cols = [FEATURES.index(c) for c in CONTINUOUS_FEATURES]
     out[:, cols] = scaler.transform(_log_continuous(X))
     return out
+
+
+VERDICTS = {
+    (True, True): "ALERTA CRÍTICA",
+    (True, False): "FUERZA BRUTA",
+    (False, True): "ANOMALÍA DE IDENTIDAD",
+    (False, False): "NORMAL",
+}
+
+
+def verdicts(rf_hit: np.ndarray, nn_hit: np.ndarray) -> list[str]:
+    """Regla combinada orientada al Recall (README, 6.3)."""
+    return [VERDICTS[key] for key in zip(rf_hit.tolist(), nn_hit.tolist())]
+
+
+def load_artifacts(models_dir: Path = MODELS_DIR) -> dict:
+    """Carga modelos, scaler y metadatos. Solo desde models/: los .pkl ejecutan código al cargarse."""
+    import joblib
+    from tensorflow import keras
+
+    paths = {
+        name: models_dir / file
+        for name, file in [
+            ("rf", "ml_auth_model.pkl"),
+            ("nn", "dl_auth_model.h5"),
+            ("scaler", "scaler.pkl"),
+            ("metadata", "metadata.json"),
+        ]
+    }
+    missing = [p.name for p in paths.values() if not p.exists()]
+    if missing:
+        raise FileNotFoundError(", ".join(missing))
+
+    return {
+        "rf": joblib.load(paths["rf"]),
+        "nn": keras.models.load_model(paths["nn"], compile=False),
+        "scaler": joblib.load(paths["scaler"]),
+        "metadata": json.loads(paths["metadata"].read_text(encoding="utf-8")),
+    }
+
+
+def score(events: pd.DataFrame, artifacts: dict) -> pd.DataFrame:
+    """Puntúa eventos con ambos modelos y aplica la regla de decisión."""
+    X = transform(validate(events), artifacts["scaler"])
+    p_rf = artifacts["rf"].predict_proba(X)[:, 1]
+    # Llamada directa en vez de predict(): evita su sobrecarga por llamada (RNF-01).
+    p_nn = np.asarray(artifacts["nn"](X, training=False)).ravel()
+    thresholds = artifacts["metadata"]["thresholds"]
+    return pd.DataFrame(
+        {
+            "p_rf": p_rf,
+            "p_nn": p_nn,
+            "verdict": verdicts(p_rf >= thresholds["rf"], p_nn >= thresholds["nn"]),
+        },
+        index=events.index,
+    )
 
 
 def main() -> None:
