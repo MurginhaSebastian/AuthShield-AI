@@ -20,7 +20,9 @@ USER authshield
 
 # 8501: dashboard (por defecto) · 8000: API (uvicorn app.api:app)
 EXPOSE 8501 8000
+# Sano si responde el modo con el que se arrancó: dashboard o API.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"
+    CMD python -c "import urllib.request as u; u.urlopen('http://localhost:8501/_stcore/health')" \
+     || python -c "import urllib.request as u; u.urlopen('http://localhost:8000/health')"
 
 CMD ["streamlit", "run", "app/dashboard.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
