@@ -89,7 +89,9 @@ with tab_sim:
         with left:
             st.subheader("Veredictos")
             counts = results["verdict"].value_counts().reindex(ICONS, fill_value=0)
-            st.bar_chart(counts.rename(index=lambda v: f"{ICONS[v]} {v}"), horizontal=True)
+            # Columnas explícitas: con la Series de value_counts() el gráfico salía vacío.
+            chart = pd.DataFrame({"Veredicto": list(counts.index), "Eventos": counts.to_numpy()})
+            st.bar_chart(chart, x="Veredicto", y="Eventos", horizontal=True, sort=False)
         with right:
             st.subheader("Alertas")
             shown = alerts.assign(
@@ -143,8 +145,9 @@ with tab_models:
         "baseline_rf_identity": "RF de referencia · identidad",
         "combined": "Veredicto combinado · todos los ataques",
     }
+    columns = {"precision": "Precision", "recall": "Recall", "f1": "F1", "f2": "F2", "pr_auc": "PR-AUC"}
     table = pd.DataFrame(
-        {names[k]: {m: v for m, v in meta["metrics"][k].items() if m != "confusion_matrix"} for k in names}
+        {names[k]: {columns[m]: meta["metrics"][k][m] for m in columns} for k in names}
     ).T
     st.dataframe(table, width="stretch")
 
@@ -152,5 +155,5 @@ with tab_models:
     st.metric("Latencia p95 por evento", f"{lat['p95']:.1f} ms", help="Requisito RNF-01: < 50 ms")
 
     st.subheader("Importancia de variables · Random Forest")
-    importance = pd.Series(meta["feature_importance"]).rename(index=LABELS).sort_values()
-    st.bar_chart(importance, horizontal=True)
+    importance = pd.Series(meta["feature_importance"]).rename(index=LABELS).sort_values(ascending=False)
+    st.bar_chart(importance, horizontal=True, sort=False)
