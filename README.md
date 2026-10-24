@@ -1,7 +1,17 @@
 # AuthShield-AI
 
 **Sistema híbrido de detección de anomalías en logs de autenticación**
-Machine Learning clásico (Random Forest) + Deep Learning (red neuronal densa en Keras), con un dashboard de simulación en Streamlit.
+Machine Learning clásico (Random Forest) + Deep Learning (red neuronal densa en Keras), con un dashboard de simulación en Streamlit y una API REST en FastAPI.
+
+![Dashboard: simulación de tráfico y alertas](docs/img/simulacion.png)
+
+<details>
+<summary>Más capturas: evaluación manual y métricas de los modelos</summary>
+
+![Evaluación manual de un login](docs/img/evento-manual.png)
+![Métricas e importancia de variables](docs/img/modelos.png)
+
+</details>
 
 ---
 
