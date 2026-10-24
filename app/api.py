@@ -1,5 +1,6 @@
 """Microservicio de evaluación de riesgo de AuthShield-AI (FastAPI)."""
 
+import os
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -16,6 +17,22 @@ from pydantic import BaseModel, ConfigDict, Field
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.pipeline import load_artifacts, score  # noqa: E402
+
+API_KEYS_ENV = "AUTHSHIELD_API_KEYS"
+MIN_KEY_LENGTH = 32
+
+
+def load_api_keys() -> list[str]:
+    """Claves válidas desde AUTHSHIELD_API_KEYS, separadas por comas (varias permiten rotarlas).
+
+    Sin claves la API no arranca: no existe un modo sin autenticación que se pueda olvidar encendido.
+    """
+    keys = [k.strip() for k in os.environ.get(API_KEYS_ENV, "").split(",") if k.strip()]
+    if not keys:
+        raise RuntimeError(f"Define {API_KEYS_ENV}: la API no arranca sin autenticación.")
+    if any(len(k) < MIN_KEY_LENGTH for k in keys):
+        raise RuntimeError(f"Cada API key debe tener al menos {MIN_KEY_LENGTH} caracteres.")
+    return keys
 
 
 class LoginEvent(BaseModel):
@@ -40,7 +57,8 @@ class Verdict(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Sin artefactos el servicio no arranca: mejor fallar aquí que en la primera petición.
+    # Sin claves o sin artefactos el servicio no arranca: mejor fallar aquí que en la primera petición.
+    app.state.api_keys = load_api_keys()
     app.state.artifacts = load_artifacts()
     # Calentamiento: Keras traza el grafo en la primera llamada (~60 ms) y no debe pagarlo un usuario.
     warmup = LoginEvent(failed_logins_5m=0, is_new_ip=0, unusual_hour=0, requests_per_minute=1.0)

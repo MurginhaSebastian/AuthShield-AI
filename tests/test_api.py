@@ -1,15 +1,36 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api import app
+from app.api import API_KEYS_ENV, app, load_api_keys
 
 NORMAL = {"failed_logins_5m": 0, "is_new_ip": 0, "unusual_hour": 0, "requests_per_minute": 2.0}
+KEY_A, KEY_B = "a" * 32, "b" * 40
 
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:  # el `with` ejecuta el lifespan y carga los modelos
-        yield c
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv(API_KEYS_ENV, f"{KEY_A}, {KEY_B}")
+        with TestClient(app) as c:  # el `with` ejecuta el lifespan y carga los modelos
+            yield c
+
+
+@pytest.mark.parametrize("value", ["", " , ", "corta", f"{KEY_A},corta"])
+def test_claves_ausentes_o_cortas_impiden_arrancar(monkeypatch, value):
+    monkeypatch.setenv(API_KEYS_ENV, value)
+    with pytest.raises(RuntimeError):
+        load_api_keys()
+
+
+def test_sin_variable_de_claves_la_api_no_arranca(monkeypatch):
+    monkeypatch.delenv(API_KEYS_ENV, raising=False)
+    with pytest.raises(RuntimeError), TestClient(app):
+        pass
+
+
+def test_varias_claves_para_rotacion(monkeypatch):
+    monkeypatch.setenv(API_KEYS_ENV, f" {KEY_A} ,{KEY_B},")
+    assert load_api_keys() == [KEY_A, KEY_B]
 
 
 def test_health(client):
