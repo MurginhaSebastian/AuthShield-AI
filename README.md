@@ -17,7 +17,17 @@ Machine Learning clásico (Random Forest) + Deep Learning (red neuronal densa en
 
 ## Inicio rápido
 
-**Con Docker** (incluye dataset y modelos ya entrenados):
+**Con Docker Compose** (dashboard y API a la vez; incluye dataset y modelos ya entrenados):
+
+```bash
+cp .env.example .env       # y pon tu clave en AUTHSHIELD_API_KEYS
+docker compose up --build -d
+# Dashboard en http://localhost:8501 · API en http://localhost:8000 (/docs)
+docker compose ps          # ambos servicios deben quedar "healthy"
+docker compose down
+```
+
+**Con Docker, servicio por servicio:**
 
 ```bash
 docker build -t auth-shield-ai .
