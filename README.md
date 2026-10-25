@@ -89,6 +89,7 @@ ruff check .
 6. [Arquitectura conceptual](#6-arquitectura-conceptual)
 7. [Alcance, supuestos y riesgos](#7-alcance-supuestos-y-riesgos)
 8. [Resultados](#8-resultados)
+9. [Publicación en internet](#9-publicación-en-internet)
 
 ---
 
@@ -382,3 +383,9 @@ Conjunto de prueba (4 000 eventos, 20 % del dataset, nunca vistos en entrenamien
 - **El robo de identidad es el caso difícil.** Un ataque con la contraseña correcta, desde una IP nueva y de madrugada se parece mucho a un usuario legítimo de viaje: con solo 4 variables, ese solapamiento es irreducible. Ahí se pierde la Precision combinada.
 - **La red neuronal sí aporta.** En la misma tarea de identidad supera al RF de referencia en F1 (0.807 frente a 0.713) con un Recall comparable: es el argumento empírico del diseño híbrido.
 - **Siguiente mejora natural:** añadir variables que distingan al viajero del atacante (viaje imposible, huella del dispositivo, reputación de la IP), fuera del alcance de esta fase (7.1).
+
+---
+
+## 9. Publicación en internet
+
+Planificada, no ejecutada: fases de endurecimiento, plataforma, despliegue continuo y verificación pública en [`docs/despliegue.md`](docs/despliegue.md).
