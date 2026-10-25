@@ -61,6 +61,7 @@ jobs:
         run: |
           docker run -d --name ui -p 8501:8501 auth-shield-ai
           docker run -d --name api -p 8000:8000 -e AUTHSHIELD_API_KEYS="$API_KEY" \
+            -e AUTHSHIELD_RATE_LIMIT_PER_MIN=3 \
             auth-shield-ai uvicorn app.api:app --host 0.0.0.0 --port 8000
       - name: Probar endpoints
         run: |
@@ -71,6 +72,11 @@ jobs:
             -H 'Content-Type: application/json' -d "$EVENT")" = 401
           curl -sf -X POST localhost:8000/evaluate -H 'Content-Type: application/json' \
             -H "X-API-Key: $API_KEY" -d "$EVENT" | grep -q "FUERZA BRUTA"
+          # Límite de 3/min: la anterior fue la 1.ª; la 2.ª y 3.ª pasan, la 4.ª recibe 429.
+          for expected in 200 200 429; do
+            test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8000/evaluate \
+              -H 'Content-Type: application/json' -H "X-API-Key: $API_KEY" -d "$EVENT")" = "$expected"
+          done
       - name: Healthcheck de Docker en ambos modos
         run: |
           for c in ui api; do
