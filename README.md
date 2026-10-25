@@ -37,6 +37,13 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 `AUTHSHIELD_API_KEYS` admite varias claves separadas por comas, para rotarlas sin cortar el servicio: se añade la nueva, se migran los clientes y se retira la vieja.
 
+**Límite de peticiones.** Cada API key puede hacer `AUTHSHIELD_RATE_LIMIT_PER_MIN` peticiones por minuto (60 por defecto), contadas en una ventana deslizante de 60 s. Al pasarse, la API responde `429` con la cabecera `Retry-After`, que indica los segundos que hay que esperar. Las peticiones con clave inválida no consumen el límite de nadie.
+
+| Variable | Obligatoria | Por defecto | Descripción |
+|---|---|---|---|
+| `AUTHSHIELD_API_KEYS` | Sí | — | Claves válidas separadas por comas, de 32 caracteres o más. |
+| `AUTHSHIELD_RATE_LIMIT_PER_MIN` | No | `60` | Peticiones por minuto y por clave. Un valor inválido impide arrancar. |
+
 **En local** (Python 3.12):
 
 ```bash
@@ -59,6 +66,7 @@ curl -X POST http://localhost:8000/evaluate \
   -d '{"failed_logins_5m": 0, "is_new_ip": 1, "unusual_hour": 1, "requests_per_minute": 9}'
 # {"p_rf":0.0,"p_nn":0.9964,"verdict":"ANOMALÍA DE IDENTIDAD","latency_ms":10.05}
 # Sin clave o con una clave incorrecta: 401 {"detail":"API key inválida o ausente"}
+# Por encima del límite: 429 {"detail":"Límite de peticiones superado"} + Retry-After
 ```
 
 **Pruebas y lint:**
@@ -123,7 +131,7 @@ Es un proyecto de portafolio de Ingeniería de Sistemas. Su objetivo es mostrar,
 | **RF-05** | Evaluación concurrente por ambos modelos | Cada evento se puntúa con los dos modelos sobre el mismo vector escalado. El RF devuelve la probabilidad de fuerza bruta, la NN la de anomalía de identidad, y el sistema emite un veredicto combinado (ver [6.3](#63-regla-de-decisión-combinada)). | La salida por evento incluye `p_rf`, `p_nn`, el veredicto final con el tipo de ataque sospechado y la latencia medida. |
 | **RF-06** | Despliegue visual de alertas | El dashboard de Streamlit (`app/dashboard.py`) muestra el flujo simulado, las alertas por nivel de severidad, la comparación entre modelos y sus métricas. | Las alertas se distinguen por color **y** por texto/icono (no solo por color). Hay una vista de “evento manual” donde el usuario ajusta las 4 features y ve el veredicto al instante. |
 | **RF-07** | Explicabilidad básica | Mostrar por qué se marcó un evento: importancia global de variables del Random Forest y valores del evento comparados con lo normal. | Cada alerta muestra qué features estaban fuera de rango. |
-| **RF-08** | API de evaluación | Microservicio HTTP (`app/api.py`, FastAPI) para que cualquier aplicación envíe un evento de login y reciba el veredicto. `POST /evaluate` (exige la cabecera `X-API-Key`) y `GET /health` (abierto, para orquestadores). | Sin clave válida: 401, antes de validar el cuerpo. Una entrada inválida (tipos, rangos, campos faltantes o desconocidos) recibe un 422 sin llegar a los modelos. La respuesta incluye `p_rf`, `p_nn`, el veredicto y la latencia. |
+| **RF-08** | API de evaluación | Microservicio HTTP (`app/api.py`, FastAPI) para que cualquier aplicación envíe un evento de login y reciba el veredicto. `POST /evaluate` (exige la cabecera `X-API-Key`) y `GET /health` (abierto, para orquestadores). | Sin clave válida: 401, antes de validar el cuerpo. Por encima del límite por clave: 429 con `Retry-After`. Una entrada inválida (tipos, rangos, campos faltantes o desconocidos) recibe un 422 sin llegar a los modelos. La respuesta incluye `p_rf`, `p_nn`, el veredicto y la latencia. |
 
 ---
 
@@ -137,7 +145,7 @@ Es un proyecto de portafolio de Ingeniería de Sistemas. Su objetivo es mostrar,
 | **RNF-04** | Modularidad | Cada módulo tiene una sola responsabilidad: `pipeline.py` transforma datos, `train.py` entrena y persiste, `dashboard.py` presenta. Cambiar o añadir un modelo no obliga a tocar el pipeline ni la UI más allá de registrarlo. | Revisión de dependencias entre módulos. |
 | **RNF-05** | Mantenibilidad | Código con tipado (*type hints*), docstrings en funciones públicas, linter y formateador en CI, y pruebas automáticas del pipeline y de la regla de decisión. | El pipeline de CI falla si fallan el lint o las pruebas. |
 | **RNF-06** | Reproducibilidad | Semillas fijas (`random_state`, semilla de TensorFlow), dependencias con versión fijada en `requirements.txt` e imagen Docker reproducible. | Dos entrenamientos con la misma semilla y los mismos datos dan métricas idénticas (RF) o casi idénticas (NN, por no determinismo de CPU). |
-| **RNF-07** | Seguridad del propio sistema | Los artefactos `.pkl` se pueden ejecutar al deserializarse: solo se cargan desde `models/` y nunca se aceptan subidos por el usuario. La imagen Docker corre con un usuario no root. CI incluye escaneo de dependencias y de secretos. La API exige API key: las claves llegan por variable de entorno (nunca en el código), se comparan en tiempo constante, y sin claves el servicio no arranca. | Revisión del Dockerfile y de los pasos de CI; pruebas de 401 y de arranque en `tests/test_api.py`. |
+| **RNF-07** | Seguridad del propio sistema | Los artefactos `.pkl` se pueden ejecutar al deserializarse: solo se cargan desde `models/` y nunca se aceptan subidos por el usuario. La imagen Docker corre con un usuario no root. CI incluye escaneo de dependencias y de secretos. La API exige API key: las claves llegan por variable de entorno (nunca en el código), se comparan en tiempo constante, y sin claves el servicio no arranca. Cada clave tiene un límite de peticiones por minuto. | Revisión del Dockerfile y de los pasos de CI; pruebas de 401, 429 y de arranque en `tests/test_api.py`. |
 | **RNF-08** | Privacidad | Los datos son sintéticos. Si en el futuro se usan logs reales, las IP y los identificadores de usuario se seudonimizan (hash) antes de entrar al pipeline. | Revisión del generador y del esquema de datos. |
 | **RNF-09** | Portabilidad | El sistema completo (entrenamiento y dashboard) se levanta con un solo `docker build` + `docker run`. | Lo comprueba el pipeline de CI. |
 
@@ -260,7 +268,7 @@ Medidos sobre el conjunto de prueba, con el veredicto combinado contra `label`. 
 | Entrenamiento | `src/train.py` | Split estratificado, entrenamiento del RF y la NN, calibración de umbrales, evaluación, medición de latencia y persistencia de artefactos. |
 | Artefactos | `models/` | `ml_auth_model.pkl` (RF), `dl_auth_model.h5` (NN), `scaler.pkl` y `metadata.json` (umbrales, métricas, latencia). Son la única interfaz entre el entrenamiento y la inferencia. |
 | Dashboard | `app/dashboard.py` | Simulación de tráfico, evaluación en vivo, alertas, métricas y vista de evento manual. |
-| API | `app/api.py` | Microservicio FastAPI: exige API key, valida el evento en la entrada, lo puntúa con `score()` y devuelve el veredicto. Carga los modelos y los calienta al arrancar. |
+| API | `app/api.py` | Microservicio FastAPI: exige API key, aplica el límite por clave, valida el evento en la entrada, lo puntúa con `score()` y devuelve el veredicto. Carga los modelos y los calienta al arrancar. |
 | Pruebas | `tests/` | Simulador, validación, escalado, regla de decisión y calibración de umbrales. |
 | CI/CD | `.github/workflows/ci-cd.yml` | Lint, pruebas, escaneo de seguridad, entrenamiento de verificación y build de la imagen Docker. |
 | Contenedor | `Dockerfile` | Empaqueta dependencias y aplicación con un usuario no root. |
@@ -325,7 +333,8 @@ Es una regla **OR orientada al Recall**: basta con que uno de los dos especialis
 - Integración con un proveedor de identidad real (Supabase Auth, Keycloak, Auth0).
 - Variables avanzadas: geolocalización, “viaje imposible”, huella del dispositivo, reputación de la IP.
 - Respuesta automática (bloqueo real de cuentas). El sistema **detecta y alerta**, no actúa.
-- Límite de peticiones (rate limiting) de la API: la autenticación ya existe, pero un cliente con clave válida puede hacer peticiones sin límite. Antes de exponerla fuera de una red de confianza, conviene ponerla detrás de un gateway con límites de tasa.
+- Límite de peticiones compartido entre procesos: el contador vive en memoria de cada proceso. Con un solo worker es exacto; con varios workers o réplicas, cada uno cuenta por su lado y el límite real se multiplica. Al escalar, hay que moverlo a Redis o al gateway.
+- Límite por IP para peticiones sin clave válida: no se limitan, porque adivinar una clave de 32 caracteres aleatorios no es viable. Contra una inundación de tráfico, se apoya en el proxy o CDN que esté delante.
 - Reentrenamiento continuo y detección de *drift* en producción.
 
 ### 7.2 Supuestos
