@@ -8,7 +8,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Sin GPU en el servidor: tensorflow-cpu, misma versión que requirements.txt (única fuente de versiones).
+RUN sed 's/^tensorflow==/tensorflow-cpu==/' requirements.txt > /tmp/req.txt \
+    && grep -q '^tensorflow-cpu==' /tmp/req.txt \
+    && pip install -r /tmp/req.txt
 
 COPY src/ src/
 COPY app/ app/
