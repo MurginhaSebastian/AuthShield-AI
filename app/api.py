@@ -28,6 +28,7 @@ MIN_KEY_LENGTH = 32
 RATE_LIMIT_ENV = "AUTHSHIELD_RATE_LIMIT_PER_MIN"
 DEFAULT_RATE_LIMIT = 60
 WINDOW_S = 60.0
+MAX_BODY_BYTES = 1024  # un evento válido ocupa ~100 bytes
 
 
 def load_api_keys() -> list[str]:
@@ -142,6 +143,20 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    """411/413 antes de autenticar: FastAPI lee el cuerpo entero antes de comprobar la API key."""
+    if request.method == "POST":
+        length = request.headers.get("content-length")
+        if length is None:
+            return JSONResponse(status_code=411, content={"detail": "Falta Content-Length"})
+        if not length.isdigit() or int(length) > MAX_BODY_BYTES:
+            return JSONResponse(
+                status_code=413, content={"detail": f"Cuerpo mayor que {MAX_BODY_BYTES} bytes"}
+            )
+    return await call_next(request)
 
 
 @app.exception_handler(RequestValidationError)

@@ -1,7 +1,15 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api import API_KEYS_ENV, RATE_LIMIT_ENV, RateLimiter, app, load_api_keys, load_rate_limit
+from app.api import (
+    API_KEYS_ENV,
+    MAX_BODY_BYTES,
+    RATE_LIMIT_ENV,
+    RateLimiter,
+    app,
+    load_api_keys,
+    load_rate_limit,
+)
 
 NORMAL = {"failed_logins_5m": 0, "is_new_ip": 0, "unusual_hour": 0, "requests_per_minute": 2.0}
 KEY_A, KEY_B = "a" * 32, "b" * 40
@@ -145,3 +153,22 @@ def test_limite_exacto_con_peticiones_concurrentes():
     with ThreadPoolExecutor(max_workers=16) as pool:
         results = list(pool.map(lambda _: limiter.retry_after("k", 0.0), range(200)))
     assert results.count(0) == 10
+
+
+def test_cuerpo_grande_413_antes_de_autenticar(client):
+    big = NORMAL | {"relleno": "x" * (2 * MAX_BODY_BYTES)}
+    assert client.post("/evaluate", json=big).status_code == 413  # sin clave: 413, no 401
+
+
+def test_content_length_falso_413(client):
+    headers = AUTH | {"Content-Type": "application/json", "Content-Length": "abc"}
+    assert client.post("/evaluate", content=b"{}", headers=headers).status_code == 413
+
+
+def test_sin_content_length_411(client):
+    def chunks():  # un generador obliga a httpx a enviar el cuerpo "chunked", sin Content-Length
+        yield b'{"failed_logins_5m": 0, "is_new_ip": 0, '
+        yield b'"unusual_hour": 0, "requests_per_minute": 2.0}'
+
+    headers = AUTH | {"Content-Type": "application/json"}
+    assert client.post("/evaluate", content=chunks(), headers=headers).status_code == 411
