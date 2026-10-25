@@ -22,7 +22,9 @@
 | Servicio | Comando | Puerto | Memoria | Instancias | Notas |
 |---|---|---|---|---|---|
 | `authshield-ui` | por defecto (Streamlit) | 8501 | 2 GiB | 0–1 | Afinidad de sesión (websockets de Streamlit) |
-| `authshield-api` | `uvicorn app.api:app --host 0.0.0.0 --port 8000 --proxy-headers` | 8000 | 2 GiB | 0–1 | `AUTHSHIELD_API_KEYS` desde Secret Manager |
+| `authshield-api` | `uvicorn app.api:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="*"` | 8000 | 2 GiB | 0–1 | `AUTHSHIELD_API_KEYS` desde Secret Manager |
+
+**Sobre `--forwarded-allow-ips="*"`:** uvicorn solo cree las cabeceras `X-Forwarded-For` de las IP indicadas (por defecto, 127.0.0.1). En la plataforma el proxy tiene otra IP, así que hay que confiar en todas. Solo es seguro porque el contenedor no es accesible directamente desde internet, sino siempre a través del proxy de la plataforma (así funciona Cloud Run). Si el contenedor se expusiera sin proxy, cualquiera podría falsificar su IP en los logs.
 
 **Pasos manuales del propietario (una vez):** crear el proyecto en Google Cloud, activar facturación y una alerta de presupuesto (p. ej. 5 USD).
 
