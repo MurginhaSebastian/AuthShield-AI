@@ -1,0 +1,10 @@
+# Demo pública: sin barra de desarrollo ni telemetría.
+[client]
+toolbarMode = "viewer"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+enableXsrfProtection = true

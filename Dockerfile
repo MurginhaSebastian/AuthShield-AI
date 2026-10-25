@@ -14,6 +14,7 @@ COPY src/ src/
 COPY app/ app/
 COPY data/ data/
 COPY models/ models/
+COPY .streamlit/ .streamlit/
 
 RUN useradd --create-home --uid 1000 authshield
 USER authshield
