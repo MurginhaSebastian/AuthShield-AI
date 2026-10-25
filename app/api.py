@@ -1,9 +1,12 @@
 """Microservicio de evaluación de riesgo de AuthShield-AI (FastAPI)."""
 
 import hmac
+import math
 import os
 import sys
+import threading
 import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -22,6 +25,9 @@ from src.pipeline import load_artifacts, score  # noqa: E402
 
 API_KEYS_ENV = "AUTHSHIELD_API_KEYS"
 MIN_KEY_LENGTH = 32
+RATE_LIMIT_ENV = "AUTHSHIELD_RATE_LIMIT_PER_MIN"
+DEFAULT_RATE_LIMIT = 60
+WINDOW_S = 60.0
 
 
 def load_api_keys() -> list[str]:
@@ -37,10 +43,44 @@ def load_api_keys() -> list[str]:
     return keys
 
 
+def load_rate_limit() -> int:
+    """Peticiones por minuto y por API key (AUTHSHIELD_RATE_LIMIT_PER_MIN, por defecto 60)."""
+    raw = os.environ.get(RATE_LIMIT_ENV, str(DEFAULT_RATE_LIMIT))
+    if not raw.strip().isdigit() or int(raw) < 1:
+        raise RuntimeError(f"{RATE_LIMIT_ENV} debe ser un entero mayor que 0.")
+    return int(raw)
+
+
+class RateLimiter:
+    """Ventana deslizante de 60 s por API key.
+
+    Solo cuenta claves ya autenticadas: inventar claves no hace crecer la memoria.
+    """
+
+    # shortcut: el contador vive en este proceso; con varios workers o réplicas cada uno cuenta
+    # por su lado y el límite real se multiplica. Al escalar, moverlo a Redis o al gateway.
+
+    def __init__(self, limit: int):
+        self.limit = limit
+        self._hits: dict[str, deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()  # FastAPI atiende los endpoints síncronos en varios hilos
+
+    def retry_after(self, key: str, now: float) -> int:
+        """0 si la petición entra (y la registra); si no, segundos hasta que quede hueco."""
+        with self._lock:
+            hits = self._hits[key]
+            while hits and now - hits[0] >= WINDOW_S:
+                hits.popleft()
+            if len(hits) < self.limit:
+                hits.append(now)
+                return 0
+            return max(1, math.ceil(WINDOW_S - (now - hits[0])))
+
+
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-def require_api_key(request: Request, api_key: str | None = Security(api_key_header)) -> None:
+def require_api_key(request: Request, api_key: str | None = Security(api_key_header)) -> str:
     """401 si falta la clave o no coincide con ninguna configurada."""
     # compare_digest tarda lo mismo acierte o falle: no deja adivinar la clave midiendo tiempos.
     # Se compara en bytes porque con texto no ASCII lanzaría TypeError (un 500).
@@ -49,6 +89,18 @@ def require_api_key(request: Request, api_key: str | None = Security(api_key_hea
     ):
         raise HTTPException(
             status_code=401, detail="API key inválida o ausente", headers={"WWW-Authenticate": "APIKey"}
+        )
+    return api_key
+
+
+def require_rate_limit(request: Request, api_key: str = Security(require_api_key)) -> None:
+    """429 con Retry-After si esta clave superó su límite por minuto."""
+    wait = request.app.state.rate_limiter.retry_after(api_key, time.monotonic())
+    if wait:
+        raise HTTPException(
+            status_code=429,
+            detail="Límite de peticiones superado",
+            headers={"Retry-After": str(wait)},
         )
 
 
@@ -76,6 +128,7 @@ class Verdict(BaseModel):
 async def lifespan(app: FastAPI):
     # Sin claves o sin artefactos el servicio no arranca: mejor fallar aquí que en la primera petición.
     app.state.api_keys = load_api_keys()
+    app.state.rate_limiter = RateLimiter(load_rate_limit())
     app.state.artifacts = load_artifacts()
     # Calentamiento: Keras traza el grafo en la primera llamada (~60 ms) y no debe pagarlo un usuario.
     warmup = LoginEvent(failed_logins_5m=0, is_new_ip=0, unusual_hour=0, requests_per_minute=1.0)
@@ -103,7 +156,7 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/evaluate", response_model=Verdict, dependencies=[Security(require_api_key)])
+@app.post("/evaluate", response_model=Verdict, dependencies=[Security(require_rate_limit)])
 def evaluate(event: LoginEvent, request: Request) -> Verdict:
     start = time.perf_counter()
     try:
