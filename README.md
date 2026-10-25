@@ -142,7 +142,7 @@ Es un proyecto de portafolio de Ingeniería de Sistemas. Su objetivo es mostrar,
 | **RF-05** | Evaluación concurrente por ambos modelos | Cada evento se puntúa con los dos modelos sobre el mismo vector escalado. El RF devuelve la probabilidad de fuerza bruta, la NN la de anomalía de identidad, y el sistema emite un veredicto combinado (ver [6.3](#63-regla-de-decisión-combinada)). | La salida por evento incluye `p_rf`, `p_nn`, el veredicto final con el tipo de ataque sospechado y la latencia medida. |
 | **RF-06** | Despliegue visual de alertas | El dashboard de Streamlit (`app/dashboard.py`) muestra el flujo simulado, las alertas por nivel de severidad, la comparación entre modelos y sus métricas. | Las alertas se distinguen por color **y** por texto/icono (no solo por color). Hay una vista de “evento manual” donde el usuario ajusta las 4 features y ve el veredicto al instante. |
 | **RF-07** | Explicabilidad básica | Mostrar por qué se marcó un evento: importancia global de variables del Random Forest y valores del evento comparados con lo normal. | Cada alerta muestra qué features estaban fuera de rango. |
-| **RF-08** | API de evaluación | Microservicio HTTP (`app/api.py`, FastAPI) para que cualquier aplicación envíe un evento de login y reciba el veredicto. `POST /evaluate` (exige la cabecera `X-API-Key`) y `GET /health` (abierto, para orquestadores). | Sin clave válida: 401, antes de validar el cuerpo. Por encima del límite por clave: 429 con `Retry-After`. Una entrada inválida (tipos, rangos, campos faltantes o desconocidos) recibe un 422 sin llegar a los modelos. La respuesta incluye `p_rf`, `p_nn`, el veredicto y la latencia. |
+| **RF-08** | API de evaluación | Microservicio HTTP (`app/api.py`, FastAPI) para que cualquier aplicación envíe un evento de login y reciba el veredicto. `POST /evaluate` (exige la cabecera `X-API-Key`) y `GET /health` (abierto, para orquestadores). | Sin clave válida: 401, antes de validar el cuerpo. Por encima del límite por clave: 429 con `Retry-After`. Cuerpo mayor de 1 KB: 413; sin `Content-Length`: 411 (ambos antes de autenticar). Una entrada inválida (tipos, rangos, campos faltantes o desconocidos) recibe un 422 sin llegar a los modelos. La respuesta incluye `p_rf`, `p_nn`, el veredicto y la latencia. |
 
 ---
 
@@ -278,7 +278,7 @@ Medidos sobre el conjunto de prueba, con el veredicto combinado contra `label`. 
 | Pipeline | `src/pipeline.py` | Simulación de eventos y generación de `data/auth_logs.csv` (RF-01), validación del esquema, escalado, carga de artefactos e inferencia con la regla combinada. |
 | Entrenamiento | `src/train.py` | Split estratificado, entrenamiento del RF y la NN, calibración de umbrales, evaluación, medición de latencia y persistencia de artefactos. |
 | Artefactos | `models/` | `ml_auth_model.pkl` (RF), `dl_auth_model.h5` (NN), `scaler.pkl` y `metadata.json` (umbrales, métricas, latencia). Son la única interfaz entre el entrenamiento y la inferencia. |
-| Dashboard | `app/dashboard.py` | Simulación de tráfico, evaluación en vivo, alertas, métricas y vista de evento manual. |
+| Dashboard | `app/dashboard.py` | Simulación de tráfico, evaluación en vivo, alertas, métricas y vista de evento manual. `.streamlit/config.toml` lo prepara para demo pública: sin barra de desarrollo ni telemetría. |
 | API | `app/api.py` | Microservicio FastAPI: exige API key, aplica el límite por clave, valida el evento en la entrada, lo puntúa con `score()` y devuelve el veredicto. Carga los modelos y los calienta al arrancar. |
 | Pruebas | `tests/` | Simulador, validación, escalado, regla de decisión y calibración de umbrales. |
 | CI/CD | `.github/workflows/ci-cd.yml` | Lint, pruebas, escaneo de seguridad, entrenamiento de verificación y build de la imagen Docker. |
@@ -398,4 +398,4 @@ Conjunto de prueba (4 000 eventos, 20 % del dataset, nunca vistos en entrenamien
 
 ## 9. Publicación en internet
 
-Planificada, no ejecutada: fases de endurecimiento, plataforma, despliegue continuo y verificación pública en [`docs/despliegue.md`](docs/despliegue.md).
+Fase 1 (endurecimiento) completada; plataforma, despliegue continuo y verificación pública pendientes. Detalle y medidas en [`docs/despliegue.md`](docs/despliegue.md).

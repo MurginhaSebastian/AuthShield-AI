@@ -1,19 +1,30 @@
 # Plan de publicación en internet
 
-> **Estado:** planificado, no ejecutado. La plataforma aún no está elegida (ver [Decisiones pendientes](#decisiones-pendientes)).
+> **Estado:** Fase 1 completada. Fases 2–4 pendientes: la plataforma aún no está elegida (ver [Decisiones pendientes](#decisiones-pendientes)). Se usará la URL de la plataforma, sin dominio propio.
 
 **Objetivo:** publicar el dashboard como demo pública del portafolio y la API protegida con API key, ambos desde la misma imagen Docker. Los datos son sintéticos: la demo no expone información real.
 
 ---
 
-## Fase 1 — Endurecer el código para internet
+## Fase 1 — Endurecer el código para internet ✅
 
-| # | Cambio | Motivo | Verificación |
+| # | Cambio | Motivo | Resultado verificado |
 |---|---|---|---|
-| 1.1 | Límite de tamaño del cuerpo en la API (413 por encima de ~1 KB) | FastAPI lee el cuerpo antes de comprobar la API key: sin límite, un cliente sin clave puede enviar JSON enormes y consumir memoria. | Prueba: cuerpo grande sin clave → 413. |
-| 1.2 | `.streamlit/config.toml`: `toolbarMode = "viewer"`, `gatherUsageStats = false`, XSRF activo | Ocultar el botón "Deploy" y el menú de desarrollador en la demo pública. | Captura del dashboard sin la barra de desarrollo. |
-| 1.3 | Uvicorn con `--proxy-headers` | Detrás del balanceador, los logs deben registrar la IP real del cliente. | Log con IP de cliente. |
-| 1.4 | `tensorflow-cpu` en la imagen | Sin GPU en el servidor: imagen más pequeña y arranque en frío más rápido. | Medir tamaño de imagen y RAM antes/después; todas las pruebas en verde. |
+| 1.1 | Límite de tamaño del cuerpo en la API: 413 por encima de 1 KB, 411 sin `Content-Length` | FastAPI lee el cuerpo antes de comprobar la API key: sin límite, un cliente sin clave puede enviar JSON enormes y consumir memoria. | Pruebas y servidor real: 2 KB sin clave → 413 (antes de autenticar); envío *chunked* → 411. |
+| 1.2 | `.streamlit/config.toml`: `toolbarMode = "viewer"`, `gatherUsageStats = false`, XSRF activo | Ocultar el botón "Deploy" y el menú de desarrollador en la demo pública. | Dashboard en el contenedor sin botón "Deploy". |
+| 1.3 | Uvicorn con `--proxy-headers` | Detrás del balanceador, los logs deben registrar la IP real del cliente. | Activo en `docker-compose.yml`; ver nota de `--forwarded-allow-ips` en la Fase 2. |
+| 1.4 | `tensorflow-cpu` en la imagen | Sin GPU en el servidor: imagen más pequeña. | Mismas probabilidades y veredictos que con `tensorflow`; CI completo en verde. |
+
+**Medidas de la imagen (Docker Compose local):**
+
+| | Con `tensorflow` | Con `tensorflow-cpu` |
+|---|---|---|
+| Tamaño de la imagen | 3,74 GB | **2,67 GB** (−29 %) |
+| RAM de la API en reposo | 333 MiB | **286 MiB** |
+| RAM del dashboard con una sesión abierta | 354 MiB | **333 MiB** |
+| Arranque hasta `healthy` | ~12 s | ~8 s |
+
+Con estas cifras, **1 GiB por servicio basta** en la Fase 2, con margen para varias sesiones simultáneas en el dashboard.
 
 ## Fase 2 — Plataforma
 
@@ -21,8 +32,8 @@
 
 | Servicio | Comando | Puerto | Memoria | Instancias | Notas |
 |---|---|---|---|---|---|
-| `authshield-ui` | por defecto (Streamlit) | 8501 | 2 GiB | 0–1 | Afinidad de sesión (websockets de Streamlit) |
-| `authshield-api` | `uvicorn app.api:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="*"` | 8000 | 2 GiB | 0–1 | `AUTHSHIELD_API_KEYS` desde Secret Manager |
+| `authshield-ui` | por defecto (Streamlit) | 8501 | 1 GiB | 0–1 | Afinidad de sesión (websockets de Streamlit) |
+| `authshield-api` | `uvicorn app.api:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="*"` | 8000 | 1 GiB | 0–1 | `AUTHSHIELD_API_KEYS` desde Secret Manager |
 
 **Sobre `--forwarded-allow-ips="*"`:** uvicorn solo cree las cabeceras `X-Forwarded-For` de las IP indicadas (por defecto, 127.0.0.1). En la plataforma el proxy tiene otra IP, así que hay que confiar en todas. Solo es seguro porque el contenedor no es accesible directamente desde internet, sino siempre a través del proxy de la plataforma (así funciona Cloud Run). Si el contenedor se expusiera sin proxy, cualquiera podría falsificar su IP en los logs.
 
