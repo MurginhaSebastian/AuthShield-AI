@@ -107,7 +107,19 @@ La IP real se obtiene del **log de peticiones de Cloud Run** (`httpRequest.remot
 
 ### Verificación pública ✅
 
-Con `curl` contra la URL pública (26-oct-2026), con la clave leída de Secret Manager a una variable, sin imprimirla:
+Con `curl` contra la URL pública (26-oct-2026), con la clave leída de Secret Manager a una variable, sin imprimirla.
+
+**Tras hacerla privada:**
+
+| Prueba | Resultado |
+|---|---|
+| Política IAM del servicio | Sin `allUsers`: nadie anónimo puede invocar |
+| Anónimo a `/health`, `/docs` y `/evaluate`, en las dos URL del servicio | 403 en todo |
+| ¿Llegan al contenedor? | No: el log de peticiones de Google registra el 403 y el contenedor no escribe nada |
+| Propietario con token de identidad, sin API key / con API key (30, sí, no, 120) | 401 / 200 `FUERZA BRUTA` |
+| Timeout del servicio | 30 s |
+
+**Cuando era pública** (comportamiento de la propia API, el mismo con identidad):
 
 | Prueba | Resultado |
 |---|---|
