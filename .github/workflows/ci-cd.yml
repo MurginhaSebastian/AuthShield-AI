@@ -81,3 +81,49 @@ jobs:
       - name: Logs si algo falla
         if: failure()
         run: docker compose logs
+
+  deploy:
+    name: Despliegue de la API en Cloud Run
+    needs: [secrets, test, docker]
+    # Solo tras el merge a main; en los PR se salta.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # token OIDC para Workload Identity Federation: sin claves de Google en el repo
+    env:
+      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/authshield/api:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build y push de la imagen
+        run: |
+          gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+      - name: Desplegar
+        # Sin --proxy-headers: la IP real está en el log de Cloud Run (ver docs/despliegue.md).
+        run: |
+          gcloud run deploy authshield-api \
+            --image "$IMAGE" \
+            --region "${{ vars.GCP_REGION }}" \
+            --port 8000 \
+            --command uvicorn \
+            --args "app.api:app,--host,0.0.0.0,--port,8000" \
+            --memory 1Gi --cpu 1 \
+            --min-instances 0 --max-instances 1 \
+            --service-account "authshield-api-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --set-secrets AUTHSHIELD_API_KEYS=authshield-api-keys:latest \
+            --allow-unauthenticated \
+            --quiet
+      - name: Prueba de humo
+        run: |
+          URL=$(gcloud run services describe authshield-api --region "${{ vars.GCP_REGION }}" --format 'value(status.url)')
+          curl -sf "$URL/health"
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/evaluate" \
+            -H 'Content-Type: application/json' \
+            -d '{"failed_logins_5m": 0, "is_new_ip": 0, "unusual_hour": 0, "requests_per_minute": 2}')" = 401
