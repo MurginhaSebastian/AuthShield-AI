@@ -103,6 +103,22 @@ La cuenta tiene facturación activa: Google **sí puede cobrar**. Uso esperado d
 
 La IP real se obtiene del **log de peticiones de Cloud Run** (`httpRequest.remoteIp`), que escribe el propio proxy de Google y el cliente no puede alterar. La API no usa la IP para ninguna decisión (el límite de peticiones va por API key), así que no se pierde nada.
 
+### Verificación pública ✅
+
+Con `curl` contra la URL pública (26-oct-2026), con la clave leída de Secret Manager a una variable, sin imprimirla:
+
+| Prueba | Resultado |
+|---|---|
+| `/health` | 200 `{"status":"ok"}` |
+| `/evaluate` sin clave / con clave falsa | 401 / 401 |
+| `/evaluate` con clave (0, sí, sí, 8) | 200 `ANOMALÍA DE IDENTIDAD` (p_nn 0,9961) |
+| 61 peticiones seguidas con clave | 60 × 200 y la 61.ª → 429 |
+| Cuerpo de 2 KB sin clave | 413 |
+| Envío *chunked* | El proxy de Google lo convierte antes de llegar a la API: con cuerpo pequeño → 401 (no 411); con 2 KB → 413. El límite de tamaño se mantiene. |
+| IP real con `X-Forwarded-For: 203.0.113.7` falso | `httpRequest.remoteIp` en el log de Cloud Run = IP pública real del cliente |
+| Configuración del servicio | máx. 1 instancia, 1 CPU, 1 GiB, cuenta `authshield-api-runtime`, secreto montado como variable |
+| Imagen en el registro | 559 MB comprimida (2,67 GB descomprimida) |
+
 ### Despliegue continuo
 
 Job `deploy` en `.github/workflows/ci-cd.yml`: solo tras un merge a `main` y con los demás jobs en verde. Construye la imagen, la sube al registro, despliega y hace una prueba de humo (`/health` → 200, `/evaluate` sin clave → 401).
