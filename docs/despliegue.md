@@ -12,7 +12,7 @@
 |---|---|---|---|
 | 1.1 | Límite de tamaño del cuerpo en la API: 413 por encima de 1 KB, 411 sin `Content-Length` | FastAPI lee el cuerpo antes de comprobar la API key: sin límite, un cliente sin clave puede enviar JSON enormes y consumir memoria. | Pruebas y servidor real: 2 KB sin clave → 413 (antes de autenticar); envío *chunked* → 411. |
 | 1.2 | `.streamlit/config.toml`: `toolbarMode = "viewer"`, `gatherUsageStats = false`, XSRF activo | Ocultar el botón "Deploy" y el menú de desarrollador en la demo pública. | Dashboard en el contenedor sin botón "Deploy". |
-| 1.3 | Uvicorn con `--proxy-headers` | Detrás del balanceador, los logs deben registrar la IP real del cliente. | Activo en `docker-compose.yml`; ver nota de `--forwarded-allow-ips` en la Fase 2. |
+| 1.3 | Uvicorn con `--proxy-headers` | Detrás de un proxy de confianza, los logs deben registrar la IP real del cliente. | Activo en `docker-compose.yml`, donde no confía en nadie salvo 127.0.0.1 (un `X-Forwarded-For` falso se ignora). **En Cloud Run no se usa:** ver [la nota sobre la IP real](#la-ip-real-detrás-del-proxy). |
 | 1.4 | `tensorflow-cpu` en la imagen | Sin GPU en el servidor: imagen más pequeña. | Mismas probabilidades y veredictos que con `tensorflow`; CI completo en verde. |
 
 **Medidas de la imagen (Docker Compose local):**
@@ -68,10 +68,15 @@ La API (`app/api.py`) solo corre en local o con Docker Compose. Para publicarla,
 
 | Servicio | Comando | Puerto | Memoria | Instancias | Notas |
 |---|---|---|---|---|---|
-| `authshield-api` | `uvicorn app.api:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="*"` | 8000 | 1 GiB | 0–1 | `AUTHSHIELD_API_KEYS` desde Secret Manager |
+| `authshield-api` | `uvicorn app.api:app --host 0.0.0.0 --port 8000` (sin opciones de proxy) | 8000 | 1 GiB | 0–1 | `AUTHSHIELD_API_KEYS` desde Secret Manager |
 
 - `max-instances=1` mantiene exacto el límite de peticiones (el contador vive en memoria de un proceso; ver README, 7.1).
-- **Sobre `--forwarded-allow-ips="*"`:** uvicorn solo cree `X-Forwarded-For` de las IP indicadas (por defecto 127.0.0.1). Detrás del proxy de Cloud Run hay que confiar en todas, lo que solo es seguro porque el contenedor no es accesible directamente desde internet. Verificado en local: con un proxy no confiable, una IP falsificada en `X-Forwarded-For` se ignora; con `*`, se registra la del cabecero.
+
+### La IP real detrás del proxy
+
+**No se usa `--forwarded-allow-ips="*"`.** Con esa opción, uvicorn toma la IP **más a la izquierda** de `X-Forwarded-For` (`uvicorn/middleware/proxy_headers.py`). Esa parte la escribe el cliente; el proxy de Google añade la IP real al **final**. Resultado: cualquiera podría falsificar su IP en los logs de uvicorn. La prueba local lo confirmó: con `*`, una petición con `X-Forwarded-For: 203.0.113.7` quedó registrada como `203.0.113.7`.
+
+La IP real se obtiene del **log de peticiones de Cloud Run** (`httpRequest.remoteIp`), que escribe el propio proxy de Google y el cliente no puede alterar. La API no usa la IP para ninguna decisión (el límite de peticiones va por API key), así que no se pierde nada.
 - Pasos del propietario: instalar `gcloud`, iniciar sesión, crear el proyecto, activar facturación y una alerta de presupuesto (p. ej. 5 USD).
 - Despliegue continuo con un job `deploy` en el CI y **Workload Identity Federation** (sin claves JSON en el repositorio).
 - Verificación: `curl` a la URL pública — 401 sin clave, 200 con clave, 429 al superar el límite, 413 con cuerpo grande, 411 sin `Content-Length`.
