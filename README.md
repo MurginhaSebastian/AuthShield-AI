@@ -8,7 +8,7 @@ Machine Learning clásico (Random Forest) + Deep Learning (red neuronal densa en
 
 **▶ Demo en vivo: [appshield-ai.streamlit.app](https://appshield-ai.streamlit.app)** (datos sintéticos; si lleva días sin visitas, tarda un momento en despertar)
 
-**▶ API pública: [authshield-api-624940884502.us-central1.run.app/docs](https://authshield-api-624940884502.us-central1.run.app/docs)** (Google Cloud Run; protegida con API key)
+**▶ API en Google Cloud Run:** privada (identidad de Google + API key); ver [Publicación en internet](#9-publicación-en-internet).
 
 ![Dashboard: simulación de tráfico y alertas](docs/img/simulacion.png)
 
@@ -407,11 +407,14 @@ Conjunto de prueba (4 000 eventos, 20 % del dataset, nunca vistos en entrenamien
 
 El **dashboard** está publicado en [appshield-ai.streamlit.app](https://appshield-ai.streamlit.app) (Streamlit Community Cloud), que se vuelve a desplegar en cada push a `main`.
 
-La **API** está publicada en Google Cloud Run: `https://authshield-api-624940884502.us-central1.run.app` (documentación interactiva en `/docs`). El job `deploy` del CI la vuelve a desplegar tras cada merge a `main`, sin claves de Google en el repositorio (Workload Identity Federation). La API key vive en Secret Manager; el propietario la consulta y la usa así:
+La **API** está desplegada en Google Cloud Run: `https://authshield-api-624940884502.us-central1.run.app`. El job `deploy` del CI la vuelve a desplegar tras cada merge a `main`, sin claves de Google en el repositorio (Workload Identity Federation).
+
+Es **privada**: sin una identidad de Google autorizada, el proxy de Google responde 403 antes de llegar al contenedor, así que una inundación de peticiones anónimas no genera coste. Dentro, la API exige además su propia API key, que vive en Secret Manager. El propietario la usa así:
 
 ```bash
 KEY=$(gcloud secrets versions access latest --secret=authshield-api-keys --project=authshield-ai)
 curl -X POST https://authshield-api-624940884502.us-central1.run.app/evaluate \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
   -H "Content-Type: application/json" -H "X-API-Key: $KEY" \
   -d '{"failed_logins_5m": 0, "is_new_ip": 1, "unusual_hour": 1, "requests_per_minute": 8}'
 ```

@@ -1,6 +1,6 @@
 # Plan de publicación en internet
 
-> **Estado:** dashboard publicado en **https://appshield-ai.streamlit.app** (Streamlit Community Cloud) y API publicada en **https://authshield-api-624940884502.us-central1.run.app** (Google Cloud Run; ver [API en internet](#api-en-internet--google-cloud-run)).
+> **Estado:** dashboard publicado en **https://appshield-ai.streamlit.app** (Streamlit Community Cloud) y API desplegada en **https://authshield-api-624940884502.us-central1.run.app** (Google Cloud Run, privada; ver [API en internet](#api-en-internet--google-cloud-run)).
 
 **Objetivo:** publicar el dashboard como demo pública del portafolio y la API protegida con API key, ambos desde la misma imagen Docker. Los datos son sintéticos: la demo no expone información real.
 
@@ -69,6 +69,8 @@ Verificado con Playwright (Edge) sobre la URL pública:
 | `authshield-api` | `uvicorn app.api:app --host 0.0.0.0 --port 8000` (sin opciones de proxy) | 8000 | 1 GiB | 0–1 | `AUTHSHIELD_API_KEYS` desde Secret Manager |
 
 - `max-instances=1` mantiene exacto el límite de peticiones (el contador vive en memoria de un proceso; ver README, 7.1).
+- `--timeout 30`: una petición lenta o retenida no mantiene la instancia facturando 5 minutos (el valor por defecto).
+- **Privada** (`--no-allow-unauthenticated`): solo entran identidades de Google con permiso de invocar (el propietario y la cuenta del CI). Google no factura las peticiones que rechaza su IAM ([precios de Cloud Run](https://cloud.google.com/run/pricing)), así que una inundación anónima cuesta 0. La demo pública es el dashboard de Streamlit.
 - Proyecto `authshield-ai`, región `us-central1`.
 
 **Infraestructura** (creada una vez con `gcloud`):
@@ -93,7 +95,7 @@ La cuenta tiene facturación activa: Google **sí puede cobrar**. Uso esperado d
 | Tope de gasto (*spend cap*) S/.7 en Cloud Run | Al alcanzarlo, Google **pausa** la API (responde 5xx) hasta el mes siguiente o hasta subir el tope | No es instantáneo: los costes pueden tardar más de 24 h en registrarse, y ese exceso se cobra |
 | Alerta de presupuesto S/.5 (toda la cuenta) | Correo al 50/90/100/150 % | Solo avisa, no detiene nada |
 
-**Riesgo restante:** el límite de peticiones solo cuenta las que llevan clave. Una inundación de peticiones sin clave (401) se factura por petición hasta que el tope actúa.
+**Por qué no Cloud Armor (WAF):** exige un balanceador de carga (~18 USD/mes), contrario al objetivo de coste casi cero. Con la API privada, el tráfico anónimo ya no llega ni se factura.
 
 **Apagarlo todo:** `gcloud run services delete authshield-api --region us-central1` (solo la API) o `gcloud projects delete authshield-ai` (todo el proyecto).
 
@@ -121,4 +123,4 @@ Con `curl` contra la URL pública (26-oct-2026), con la clave leída de Secret M
 
 ### Despliegue continuo
 
-Job `deploy` en `.github/workflows/ci-cd.yml`: solo tras un merge a `main` y con los demás jobs en verde. Construye la imagen, la sube al registro, despliega y hace una prueba de humo (`/health` → 200, `/evaluate` sin clave → 401).
+Job `deploy` en `.github/workflows/ci-cd.yml`: solo tras un merge a `main` y con los demás jobs en verde. Construye la imagen, la sube al registro, despliega y hace una prueba de humo: sin identidad de Google → 403; con el token de identidad del CI, `/health` → 200 y `/evaluate` sin API key → 401. Las acciones de este job están fijadas por commit (SHA), no por etiqueta.

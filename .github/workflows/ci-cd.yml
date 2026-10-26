@@ -93,13 +93,14 @@ jobs:
       id-token: write  # token OIDC para Workload Identity Federation: sin claves de Google en el repo
     env:
       IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/authshield/api:${{ github.sha }}
+    # Acciones fijadas por commit: este job tiene permisos de despliegue y una etiqueta movida no debe heredarlos.
     steps:
-      - uses: actions/checkout@v5
-      - uses: google-github-actions/auth@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOY_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f  # v2
       - name: Build y push de la imagen
         run: |
           gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
@@ -116,14 +117,30 @@ jobs:
             --args "app.api:app,--host,0.0.0.0,--port,8000" \
             --memory 1Gi --cpu 1 \
             --min-instances 0 --max-instances 1 \
+            --timeout 30 \
             --service-account "authshield-api-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --set-secrets AUTHSHIELD_API_KEYS=authshield-api-keys:latest \
-            --allow-unauthenticated \
+            --no-allow-unauthenticated \
             --quiet
+      # Privada: Google rechaza sin identidad antes del contenedor, y esas peticiones no se facturan.
+      - name: URL del servicio
+        id: service
+        run: echo "url=$(gcloud run services describe authshield-api --region "${{ vars.GCP_REGION }}" --format 'value(status.url)')" >> "$GITHUB_OUTPUT"
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
+        id: id-token
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.service.outputs.url }}
+          id_token_include_email: true
       - name: Prueba de humo
+        env:
+          URL: ${{ steps.service.outputs.url }}
+          TOKEN: ${{ steps.id-token.outputs.id_token }}
         run: |
-          URL=$(gcloud run services describe authshield-api --region "${{ vars.GCP_REGION }}" --format 'value(status.url)')
-          curl -sf "$URL/health"
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")" = 403
+          curl -sf -H "Authorization: Bearer $TOKEN" "$URL/health"
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/evaluate" \
-            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
             -d '{"failed_logins_5m": 0, "is_new_ip": 0, "unusual_hour": 0, "requests_per_minute": 2}')" = 401
