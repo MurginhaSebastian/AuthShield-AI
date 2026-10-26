@@ -1,6 +1,6 @@
 # Plan de publicación en internet
 
-> **Estado:** dashboard publicado en **https://appshield-ai.streamlit.app** (Streamlit Community Cloud). La API no está publicada; para hacerlo, ver [API en internet](#api-en-internet-pendiente).
+> **Estado:** dashboard publicado en **https://appshield-ai.streamlit.app** (Streamlit Community Cloud) y API publicada en **https://authshield-api-624940884502.us-central1.run.app** (Google Cloud Run; ver [API en internet](#api-en-internet--google-cloud-run)).
 
 **Objetivo:** publicar el dashboard como demo pública del portafolio y la API protegida con API key, ambos desde la misma imagen Docker. Los datos son sintéticos: la demo no expone información real.
 
@@ -43,7 +43,7 @@ Con estas cifras, **1 GiB por servicio basta** en la Fase 2, con margen para var
 | Plataforma | Resultado |
 |---|---|
 | Hugging Face Spaces | Rechazado con **402**: los Spaces Docker en hardware gratuito exigen suscripción PRO (9 USD/mes). Si se activa PRO, `deploy/huggingface/publish.py <usuario>/<space>` publica el dashboard (sube solo una lista explícita de archivos; nunca `.env`). |
-| Google Cloud Run | Requiere facturación con tarjeta. Sigue siendo la opción para publicar también la API (ver abajo). |
+| Google Cloud Run | Requiere facturación con tarjeta. Se usa solo para la API (ver abajo). |
 | Render | El plan gratuito (512 MB, CPU compartida mínima) es demasiado justo para cargar TensorFlow. |
 
 **Limitaciones del plan gratuito:** la app se suspende tras unos días sin visitas; quien entre después ve un botón para despertarla y espera a que arranque.
@@ -62,21 +62,47 @@ Verificado con Playwright (Edge) sobre la URL pública:
 - Pestañas "Evento manual" (veredicto `NORMAL` por defecto) y "Modelos" (métricas y latencia p95) correctas.
 - Sin errores de consola; se ve bien en escritorio y en móvil (390 px).
 
-## API en internet (pendiente)
-
-La API (`app/api.py`) solo corre en local o con Docker Compose. Para publicarla, el plan sigue siendo **Google Cloud Run**:
+## API en internet ✅ Google Cloud Run
 
 | Servicio | Comando | Puerto | Memoria | Instancias | Notas |
 |---|---|---|---|---|---|
 | `authshield-api` | `uvicorn app.api:app --host 0.0.0.0 --port 8000` (sin opciones de proxy) | 8000 | 1 GiB | 0–1 | `AUTHSHIELD_API_KEYS` desde Secret Manager |
 
 - `max-instances=1` mantiene exacto el límite de peticiones (el contador vive en memoria de un proceso; ver README, 7.1).
+- Proyecto `authshield-ai`, región `us-central1`.
+
+**Infraestructura** (creada una vez con `gcloud`):
+
+| Recurso | Para qué | Permisos |
+|---|---|---|
+| Artifact Registry `authshield` | Imágenes de la API, etiquetadas con el commit | Regla de limpieza: conserva las 2 versiones más recientes |
+| Secret Manager `authshield-api-keys` | La API key; nunca está en el repositorio ni en la imagen | — |
+| Cuenta `authshield-api-runtime` | Con la que corre la API | Solo lee ese secreto |
+| Cuenta `github-deployer` | Con la que despliega el CI | `run.admin`, escribir en el registro, actuar como la cuenta runtime |
+| Workload Identity Federation (pool `github`) | GitHub se identifica ante Google sin claves JSON | Solo el repositorio `MurginhaSebastian/AuthShield-AI` y la rama `main` |
+
+Las variables del repositorio (`GCP_PROJECT_ID`, `GCP_REGION`, `GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA`) son identificadores, no secretos.
+
+### Control de costes
+
+La cuenta tiene facturación activa: Google **sí puede cobrar**. Uso esperado de una demo de portafolio: dentro de la capa gratuita de Cloud Run (2 M peticiones, 180 000 vCPU-s y 360 000 GiB-s al mes, por cuenta de facturación). Lo único que se cobra es el almacenamiento de la imagen por encima de los 0,5 GB gratis del registro: céntimos al mes.
+
+| Protección | Qué hace | Límite |
+|---|---|---|
+| `max-instances=1`, `min-instances=0` | Como mucho una instancia, y ninguna sin tráfico | CPU y memoria: ~2,3 USD/día en el peor caso |
+| Tope de gasto (*spend cap*) S/.7 en Cloud Run | Al alcanzarlo, Google **pausa** la API (responde 5xx) hasta el mes siguiente o hasta subir el tope | No es instantáneo: los costes pueden tardar más de 24 h en registrarse, y ese exceso se cobra |
+| Alerta de presupuesto S/.5 (toda la cuenta) | Correo al 50/90/100/150 % | Solo avisa, no detiene nada |
+
+**Riesgo restante:** el límite de peticiones solo cuenta las que llevan clave. Una inundación de peticiones sin clave (401) se factura por petición hasta que el tope actúa.
+
+**Apagarlo todo:** `gcloud run services delete authshield-api --region us-central1` (solo la API) o `gcloud projects delete authshield-ai` (todo el proyecto).
 
 ### La IP real detrás del proxy
 
 **No se usa `--forwarded-allow-ips="*"`.** Con esa opción, uvicorn toma la IP **más a la izquierda** de `X-Forwarded-For` (`uvicorn/middleware/proxy_headers.py`). Esa parte la escribe el cliente; el proxy de Google añade la IP real al **final**. Resultado: cualquiera podría falsificar su IP en los logs de uvicorn. La prueba local lo confirmó: con `*`, una petición con `X-Forwarded-For: 203.0.113.7` quedó registrada como `203.0.113.7`.
 
 La IP real se obtiene del **log de peticiones de Cloud Run** (`httpRequest.remoteIp`), que escribe el propio proxy de Google y el cliente no puede alterar. La API no usa la IP para ninguna decisión (el límite de peticiones va por API key), así que no se pierde nada.
-- Pasos del propietario: instalar `gcloud`, iniciar sesión, crear el proyecto, activar facturación y una alerta de presupuesto (p. ej. 5 USD).
-- Despliegue continuo con un job `deploy` en el CI y **Workload Identity Federation** (sin claves JSON en el repositorio).
-- Verificación: `curl` a la URL pública — 401 sin clave, 200 con clave, 429 al superar el límite, 413 con cuerpo grande, 411 sin `Content-Length`.
+
+### Despliegue continuo
+
+Job `deploy` en `.github/workflows/ci-cd.yml`: solo tras un merge a `main` y con los demás jobs en verde. Construye la imagen, la sube al registro, despliega y hace una prueba de humo (`/health` → 200, `/evaluate` sin clave → 401).
