@@ -3,6 +3,11 @@
 **Sistema híbrido de detección de anomalías en logs de autenticación**
 Machine Learning clásico (Random Forest) + Deep Learning (red neuronal densa en Keras), con un dashboard de simulación en Streamlit y una API REST en FastAPI.
 
+[![Demo en vivo](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://appshield-ai.streamlit.app)
+[![CI/CD](https://github.com/MurginhaSebastian/AuthShield-AI/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/MurginhaSebastian/AuthShield-AI/actions/workflows/ci-cd.yml)
+
+**▶ Demo en vivo: [appshield-ai.streamlit.app](https://appshield-ai.streamlit.app)** (datos sintéticos; si lleva días sin visitas, tarda un momento en despertar)
+
 ![Dashboard: simulación de tráfico y alertas](docs/img/simulacion.png)
 
 <details>
@@ -398,4 +403,4 @@ Conjunto de prueba (4 000 eventos, 20 % del dataset, nunca vistos en entrenamien
 
 ## 9. Publicación en internet
 
-Fase 1 (endurecimiento) completada; plataforma, despliegue continuo y verificación pública pendientes. Detalle y medidas en [`docs/despliegue.md`](docs/despliegue.md).
+El **dashboard** está publicado en [appshield-ai.streamlit.app](https://appshield-ai.streamlit.app) (Streamlit Community Cloud), que se vuelve a desplegar en cada push a `main`. La **API** aún no está publicada: el plan para hacerlo con Google Cloud Run, junto con las medidas de la imagen y la verificación pública, está en [`docs/despliegue.md`](docs/despliegue.md).

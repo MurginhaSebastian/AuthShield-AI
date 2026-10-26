@@ -1,6 +1,6 @@
 # Plan de publicación en internet
 
-> **Estado:** Fase 1 completada. Fases 2–4 pendientes: la plataforma aún no está elegida (ver [Decisiones pendientes](#decisiones-pendientes)). Se usará la URL de la plataforma, sin dominio propio.
+> **Estado:** dashboard publicado en **https://appshield-ai.streamlit.app** (Streamlit Community Cloud). La API no está publicada; para hacerlo, ver [API en internet](#api-en-internet-pendiente).
 
 **Objetivo:** publicar el dashboard como demo pública del portafolio y la API protegida con API key, ambos desde la misma imagen Docker. Los datos son sintéticos: la demo no expone información real.
 
@@ -26,43 +26,52 @@
 
 Con estas cifras, **1 GiB por servicio basta** en la Fase 2, con margen para varias sesiones simultáneas en el dashboard.
 
-## Fase 2 — Plataforma
+## Fase 2 — Plataforma ✅ Streamlit Community Cloud
 
-**Recomendación: Google Cloud Run.** Despliega la imagen tal cual, HTTPS automático, secretos en Secret Manager, escala a cero y su capa gratuita cubre tráfico de portafolio. Permite fijar `max-instances=1`, lo que mantiene exacto el límite de peticiones (el contador vive en memoria de un proceso; ver README, 7.1).
+**Elegida: Streamlit Community Cloud** — gratuita, sin tarjeta, despliega directamente desde este repositorio de GitHub.
+
+| Ajuste | Valor |
+|---|---|
+| Repositorio / rama | `MurginhaSebastian/AuthShield-AI` · `main` |
+| Archivo principal | `app/dashboard.py` |
+| Python | **3.12** (TensorFlow 2.18 no soporta 3.13) |
+| Dependencias | `requirements.txt` de la raíz |
+| Configuración | `.streamlit/config.toml` (se lee automáticamente) |
+
+**Por qué no las otras opciones:**
+
+| Plataforma | Resultado |
+|---|---|
+| Hugging Face Spaces | Rechazado con **402**: los Spaces Docker en hardware gratuito exigen suscripción PRO (9 USD/mes). Si se activa PRO, `deploy/huggingface/publish.py <usuario>/<space>` publica el dashboard (sube solo una lista explícita de archivos; nunca `.env`). |
+| Google Cloud Run | Requiere facturación con tarjeta. Sigue siendo la opción para publicar también la API (ver abajo). |
+| Render | El plan gratuito (512 MB, CPU compartida mínima) es demasiado justo para cargar TensorFlow. |
+
+**Limitaciones del plan gratuito:** la app se suspende tras unos días sin visitas; quien entre después ve un botón para despertarla y espera a que arranque.
+
+## Fase 3 — Despliegue continuo ✅ (lo hace la plataforma)
+
+Streamlit Community Cloud vuelve a desplegar el dashboard en cada push a `main`. No hace falta un job de despliegue propio.
+
+**Riesgo conocido:** la plataforma despliega aunque el CI de GitHub falle. Mitigación: trabajar en ramas y fusionar a `main` solo con el CI en verde (se puede forzar con una regla de protección de rama en GitHub).
+
+## Fase 4 — Verificación pública ✅ (dashboard)
+
+Verificado con Playwright (Edge) sobre la URL pública:
+
+- Simulación de 1 000 eventos: 105/106 ataques detectados, igual que en local.
+- Pestañas "Evento manual" (veredicto `NORMAL` por defecto) y "Modelos" (métricas y latencia p95) correctas.
+- Sin errores de consola; se ve bien en escritorio y en móvil (390 px).
+
+## API en internet (pendiente)
+
+La API (`app/api.py`) solo corre en local o con Docker Compose. Para publicarla, el plan sigue siendo **Google Cloud Run**:
 
 | Servicio | Comando | Puerto | Memoria | Instancias | Notas |
 |---|---|---|---|---|---|
-| `authshield-ui` | por defecto (Streamlit) | 8501 | 1 GiB | 0–1 | Afinidad de sesión (websockets de Streamlit) |
 | `authshield-api` | `uvicorn app.api:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="*"` | 8000 | 1 GiB | 0–1 | `AUTHSHIELD_API_KEYS` desde Secret Manager |
 
-**Sobre `--forwarded-allow-ips="*"`:** uvicorn solo cree las cabeceras `X-Forwarded-For` de las IP indicadas (por defecto, 127.0.0.1). En la plataforma el proxy tiene otra IP, así que hay que confiar en todas. Solo es seguro porque el contenedor no es accesible directamente desde internet, sino siempre a través del proxy de la plataforma (así funciona Cloud Run). Si el contenedor se expusiera sin proxy, cualquiera podría falsificar su IP en los logs.
-
-**Pasos manuales del propietario (una vez):** crear el proyecto en Google Cloud, activar facturación y una alerta de presupuesto (p. ej. 5 USD).
-
-**Compromiso del escalado a cero:** el primer acceso tras un rato sin tráfico tarda ~10–20 s en cargar TensorFlow. Si molesta en la demo, `min-instances=1` en el dashboard (con coste mensual).
-
-**Alternativas evaluadas:**
-
-| Plataforma | A favor | En contra |
-|---|---|---|
-| Hugging Face Spaces | Gratis, sin tarjeta, habitual en portafolios de ML | Un Space expone una sola app: solo el dashboard, la API quedaría sin publicar |
-| Render | Configuración muy simple | El plan gratuito (512 MB) no alcanza para TensorFlow; ~7–25 USD/mes por servicio |
-
-## Fase 3 — Despliegue continuo desde GitHub
-
-- Nuevo job `deploy` en `.github/workflows/ci-cd.yml`: solo en `main` y solo si secretos, pruebas y build pasan.
-- Construye la imagen, la sube a Artifact Registry y actualiza ambos servicios.
-- Autenticación con **Workload Identity Federation**: GitHub se identifica ante Google sin claves JSON guardadas en el repositorio.
-
-## Fase 4 — Verificación pública y portafolio
-
-- `curl` contra las URLs públicas: 401 sin clave, 200 con clave, 429 al superar el límite, 413 con cuerpo grande.
-- Dashboard recorrido en navegador (Playwright) sobre la URL pública.
-- Monitor de disponibilidad sobre `/health` (p. ej. UptimeRobot, gratuito).
-- README: enlace "Demo en vivo" y badge del CI.
-
-## Decisiones pendientes
-
-1. **Plataforma:** Cloud Run (recomendada), Hugging Face Spaces o Render.
-2. **Dominio propio** o URLs de la plataforma.
-3. **Dashboard abierto o con login** (`st.login` con OIDC). Abierto es razonable para una demo con datos sintéticos.
+- `max-instances=1` mantiene exacto el límite de peticiones (el contador vive en memoria de un proceso; ver README, 7.1).
+- **Sobre `--forwarded-allow-ips="*"`:** uvicorn solo cree `X-Forwarded-For` de las IP indicadas (por defecto 127.0.0.1). Detrás del proxy de Cloud Run hay que confiar en todas, lo que solo es seguro porque el contenedor no es accesible directamente desde internet. Verificado en local: con un proxy no confiable, una IP falsificada en `X-Forwarded-For` se ignora; con `*`, se registra la del cabecero.
+- Pasos del propietario: instalar `gcloud`, iniciar sesión, crear el proyecto, activar facturación y una alerta de presupuesto (p. ej. 5 USD).
+- Despliegue continuo con un job `deploy` en el CI y **Workload Identity Federation** (sin claves JSON en el repositorio).
+- Verificación: `curl` a la URL pública — 401 sin clave, 200 con clave, 429 al superar el límite, 413 con cuerpo grande, 411 sin `Content-Length`.
