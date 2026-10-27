@@ -8,7 +8,7 @@ Machine Learning clásico (Random Forest) + Deep Learning (red neuronal densa en
 
 **▶ Demo en vivo: [appshield-ai.streamlit.app](https://appshield-ai.streamlit.app)** (datos sintéticos; si lleva días sin visitas, tarda un momento en despertar)
 
-**▶ API en Google Cloud Run:** privada (identidad de Google + API key); ver [Publicación en internet](#9-publicación-en-internet).
+**▶ API en Google Cloud Run:** privada (identidad de Google + API key). Documentación: [especificación interactiva](https://editor.swagger.io/?url=https://raw.githubusercontent.com/MurginhaSebastian/AuthShield-AI/main/docs/openapi.json), capturas y respuestas reales en [Publicación en internet](#9-publicación-en-internet).
 
 ![Dashboard: simulación de tráfico y alertas](docs/img/simulacion.png)
 
