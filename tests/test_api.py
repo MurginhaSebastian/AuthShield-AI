@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -172,3 +175,11 @@ def test_sin_content_length_411(client):
 
     headers = AUTH | {"Content-Type": "application/json"}
     assert client.post("/evaluate", content=chunks(), headers=headers).status_code == 411
+
+
+def test_openapi_publicada_al_dia():
+    publicada = json.loads((Path(__file__).parents[1] / "docs" / "openapi.json").read_text(encoding="utf-8"))
+    assert publicada == app.openapi(), (
+        "docs/openapi.json no coincide con la API: regenérala con "
+        "python -c \"import json; from app.api import app; print(json.dumps(app.openapi(), ensure_ascii=False, indent=2))\" > docs/openapi.json"
+    )
