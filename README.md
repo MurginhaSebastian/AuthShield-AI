@@ -6,8 +6,9 @@ Machine Learning clásico (Random Forest) + Deep Learning (red neuronal densa en
 [![Demo en vivo](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://appshield-ai.streamlit.app)
 [![CI/CD](https://github.com/MurginhaSebastian/AuthShield-AI/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/MurginhaSebastian/AuthShield-AI/actions/workflows/ci-cd.yml)
 
-**▶ Demo en vivo: [appshield-ai.streamlit.app](https://appshield-ai.streamlit.app)** 
-**▶ API en Google Cloud Run:** privada (identidad de Google + API key); ver [Publicación en internet](#9-publicación-en-internet).
+**▶ Demo en vivo: [appshield-ai.streamlit.app](https://appshield-ai.streamlit.app)**
+
+**▶ API en Google Cloud Run:** privada (identidad de Google + API key). Documentación: [especificación interactiva](https://editor.swagger.io/?url=https://raw.githubusercontent.com/MurginhaSebastian/AuthShield-AI/main/docs/openapi.json), capturas y respuestas reales en [Publicación en internet](#9-publicación-en-internet).
 
 ![Dashboard: simulación de tráfico y alertas](docs/img/simulacion.png)
 
@@ -417,5 +418,24 @@ curl -X POST https://authshield-api-624940884502.us-central1.run.app/evaluate \
   -H "Content-Type: application/json" -H "X-API-Key: $KEY" \
   -d '{"failed_logins_5m": 0, "is_new_ip": 1, "unusual_hour": 1, "requests_per_minute": 8}'
 ```
+
+Respuestas reales de Cloud Run (26-oct-2026) para un evento de fuerza bruta (30, sí, no, 120):
+
+```text
+Sin identidad de Google          → 403 Forbidden (lo corta el proxy de Google; no llega al contenedor)
+Con identidad, sin API key       → 401 {"detail":"API key inválida o ausente"}
+Con identidad y API key          → 200 {"p_rf":1.0,"p_nn":0.0001,"verdict":"FUERZA BRUTA","latency_ms":21.94}
+```
+
+**Documentación de la API** sin acceso al servicio: la especificación OpenAPI está en [`docs/openapi.json`](docs/openapi.json), y se puede [navegar de forma interactiva en Swagger Editor](https://editor.swagger.io/?url=https://raw.githubusercontent.com/MurginhaSebastian/AuthShield-AI/main/docs/openapi.json). Una prueba del CI impide que se desfase del código. Así se ve `/docs` con la misma API corriendo en local:
+
+![Documentación interactiva de la API: endpoints y esquemas](docs/img/api-docs.png)
+
+<details>
+<summary>Evaluación de un login desde <code>/docs</code> (respuesta 200, FUERZA BRUTA)</summary>
+
+![Petición a /evaluate desde la documentación interactiva](docs/img/api-evaluate.png)
+
+</details>
 
 Ajustes, control de costes y verificación pública: [`docs/despliegue.md`](docs/despliegue.md).

@@ -133,6 +133,18 @@ Con `curl` contra la URL pública (26-oct-2026), con la clave leída de Secret M
 | Configuración del servicio | máx. 1 instancia, 1 CPU, 1 GiB, cuenta `authshield-api-runtime`, secreto montado como variable |
 | Imagen en el registro | 559 MB comprimida (2,67 GB descomprimida) |
 
+### Documentación pública de la API ✅
+
+Con la API privada, su documentación se publica sin exponer el servicio (verificado el 27-oct-2026):
+
+| Prueba | Resultado |
+|---|---|
+| `docs/openapi.json` generado con `app.openapi()` | Endpoints `/health` y `/evaluate`; esquemas `LoginEvent`, `Verdict` y de validación |
+| Prueba anti-desfase (`test_openapi_publicada_al_dia`) | Pasa; falla si se altera el archivo (comprobado cambiando la versión) |
+| Suite completa | 52 pruebas en verde |
+| Swagger Editor con `?url=` al `openapi.json` en GitHub | Carga el título, los 2 endpoints y los 4 esquemas |
+| Capturas `docs/img/api-docs.png` y `api-evaluate.png` | Tomadas con Playwright contra la API en local; la clave no aparece en ninguna (comprobado antes de capturar) |
+
 ### Despliegue continuo
 
 Job `deploy` en `.github/workflows/ci-cd.yml`: solo tras un merge a `main` y con los demás jobs en verde. Construye la imagen, la sube al registro, despliega y hace una prueba de humo: sin identidad de Google → 403; con el token de identidad del CI, `/health` → 200 y `/evaluate` sin API key → 401. Las acciones de este job están fijadas por commit (SHA), no por etiqueta.

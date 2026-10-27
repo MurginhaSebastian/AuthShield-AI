@@ -1,0 +1,217 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AuthShield-AI",
+    "description": "Evalúa eventos de login con un Random Forest (fuerza bruta) y una red neuronal (identidad).",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/evaluate": {
+      "post": {
+        "summary": "Evaluate",
+        "operationId": "evaluate_evaluate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Verdict"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "LoginEvent": {
+        "properties": {
+          "failed_logins_5m": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Failed Logins 5M",
+            "description": "Intentos fallidos en los últimos 5 minutos"
+          },
+          "is_new_ip": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ],
+            "title": "Is New Ip",
+            "description": "1 si la IP nunca se vio para este usuario"
+          },
+          "unusual_hour": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ],
+            "title": "Unusual Hour",
+            "description": "1 si ocurre fuera del horario habitual"
+          },
+          "requests_per_minute": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Requests Per Minute",
+            "description": "Peticiones de autenticación por minuto"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "failed_logins_5m",
+          "is_new_ip",
+          "unusual_hour",
+          "requests_per_minute"
+        ],
+        "title": "LoginEvent",
+        "description": "Evento de autenticación ya resumido en las 4 features (README, 4)."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "Verdict": {
+        "properties": {
+          "p_rf": {
+            "type": "number",
+            "title": "P Rf",
+            "description": "Probabilidad de fuerza bruta (Random Forest)"
+          },
+          "p_nn": {
+            "type": "number",
+            "title": "P Nn",
+            "description": "Probabilidad de anomalía de identidad (red neuronal)"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "ALERTA CRÍTICA",
+              "FUERZA BRUTA",
+              "ANOMALÍA DE IDENTIDAD",
+              "NORMAL"
+            ],
+            "title": "Verdict"
+          },
+          "latency_ms": {
+            "type": "number",
+            "title": "Latency Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "p_rf",
+          "p_nn",
+          "verdict",
+          "latency_ms"
+        ],
+        "title": "Verdict"
+      }
+    },
+    "securitySchemes": {
+      "APIKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    }
+  }
+}
